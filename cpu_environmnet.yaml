@@ -1,4 +1,4 @@
-name: mats
+name: maps
 channels:
   - conda-forge
   - pytorch
