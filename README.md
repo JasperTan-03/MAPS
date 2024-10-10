@@ -1,5 +1,5 @@
-# MATS
-Multi-Agent Task Scheduling
+# MAPS
+Multi-Agent Lidar 3D Point Cloud Segmentation
 
 ## Setup
 
