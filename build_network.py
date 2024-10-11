@@ -6,21 +6,24 @@ from sklearn.neighbors import KDTree
 
 
 def load_point_cloud(filename):
-    points = np.loadtxt(filename, max_rows=1000)
-    print("Loaded", points.shape[0], "points")
-    print(points[0])
-    points = points[:, :3]  # get x, y, z
-    print(points[0])
-    return points
+    data = np.loadtxt(filename, max_rows=1000)
+    points = data[:, :3]  # get x, y, z
+    colors = data[:, 3:]  # get r, g, b
+    return points, colors
 
 
-def build_knn_network(points: np.ndarray, k: int = 5):
+def build_knn_network(points: np.ndarray, colors: np.ndarray, k: int = 5):
 
     tree = KDTree(points)
     distances, indices = tree.query(points, k=k + 1)
 
     # Create a graph
     G = nx.Graph()
+
+    for i in range(points.shape[0]):
+        intensity, r, g, b = colors[i]
+        G.add_node(i, pos=points[i], intensity=intensity, r=r, g=g, b=b)
+
     for i in range(points.shape[0]):
         for j in range(1, k + 1):
             G.add_edge(i, indices[i, j], weight=distances[i, j])
@@ -39,9 +42,9 @@ if __name__ == "__main__":
 
     data = args.point_cloud
 
-    points = load_point_cloud(data)
+    points, colors = load_point_cloud(data)
 
-    graph = build_knn_network(points, k=5)
+    graph = build_knn_network(points, colors, k=5)
 
     print("Number of nodes:", graph.number_of_nodes())
 
