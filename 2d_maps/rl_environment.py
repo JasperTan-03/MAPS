@@ -16,7 +16,7 @@ class SegmentationEnv(gym.Env):
 
         # State space: position and pixel features
         self.observation_space = Box(
-            low=0, high=255, shape=(self.height, self.width, 3), dtype=np.uint8
+            low=0, high=255, shape=(self.height, self.width, 4), dtype=np.uint8
         )
 
     def reset(self):
