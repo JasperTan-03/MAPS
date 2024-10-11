@@ -8,7 +8,7 @@ dependencies:
   - pytorch
   - bitsandbytes
   - peft
-  - numpy
+  - numpy<2
   - pandas
   - scikit-learn
   - transformers
@@ -20,5 +20,7 @@ dependencies:
   - tqdm
   - pytables
   - torchmetrics
-  - gym
-  - networkx
+  - gymnasium
+  - stable-baselines3
+  - pip:
+    - shimmy>=0.2.1

@@ -1,5 +1,6 @@
-# Project Specific
+data
 data/
+2d_maps/output/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
