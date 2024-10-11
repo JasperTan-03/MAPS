@@ -20,4 +20,7 @@ dependencies:
   - tqdm
   - pytables
   - torchmetrics
-  - gym
+  - gymnasium
+  - stable-baselines3
+  - pip:
+    - shimmy>=0.2.1
