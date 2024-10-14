@@ -6,7 +6,8 @@ from sklearn.neighbors import KDTree
 
 
 def load_point_cloud(filename):
-    data = np.loadtxt(filename, max_rows=1000)
+    data = np.loadtxt(filename)
+    print(data.shape)
     points = data[:, :3]  # get x, y, z
     colors = data[:, 3:]  # get r, g, b
     return points, colors
@@ -22,13 +23,17 @@ def build_knn_network(points: np.ndarray, colors: np.ndarray, k: int = 5):
 
     for i in range(points.shape[0]):
         intensity, r, g, b = colors[i]
-        G.add_node(i, pos=points[i], intensity=intensity, r=r, g=g, b=b)
+        x, y, z = points[i]
+        G.add_node(i, x=x, y=y, z=z, intensity=intensity, r=r, g=g, b=b)
 
     for i in range(points.shape[0]):
         for j in range(1, k + 1):
             G.add_edge(i, indices[i, j], weight=distances[i, j])
 
     return G
+
+def save_graph(graph, filename):
+    nx.write_gexf(graph, filename)
 
 
 if __name__ == "__main__":
@@ -46,12 +51,4 @@ if __name__ == "__main__":
 
     graph = build_knn_network(points, colors, k=5)
 
-    print("Number of nodes:", graph.number_of_nodes())
-
-    print("Number of edges:", graph.number_of_edges())
-
-    print("Average degree:", np.mean(list(dict(graph.degree()).values())))
-
-    print("Average shortest path length:", nx.average_shortest_path_length(graph))
-
-    print("Average clustering coefficient:", nx.average_clustering(graph))
+    save_graph(graph, "data/bildstein_station1.gexf")
