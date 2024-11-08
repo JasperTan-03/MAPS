@@ -1,6 +1,7 @@
 import random
 from enum import Enum
 
+import numpy as np
 import pygame
 import torch
 
@@ -10,11 +11,13 @@ class AgentAction(Enum):
     RIGHT = 1
     UP = 2
     DOWN = 3
+    CLASSIFY = 4
 
 
-class PicturePixel(Enum):
-    OBJECT = 1
-    BACKGROUND = 0
+class PixelClass(Enum):
+    UNCLASSIFIED = 0
+    BACKGROUND = 1
+    OBJECT = 2
 
 
 class SegmentationAgent:
@@ -22,23 +25,25 @@ class SegmentationAgent:
         self.height = height
         self.width = width
 
-        self.state = torch.zeros((height, width))
+        self.state = None
+        self.path = None
         self.current_position = None
         self.labels = labels
 
         self.reset()
 
     def reset(self, seed=None):
-        self.state = torch.zeros((self.height, self.width))
+        self.state = np.zeros((self.height, self.width))
+        self.path = np.zeros((self.height, self.width))
 
         random.seed(seed)
         self.current_position = (
             random.randint(0, self.height - 1),
             random.randint(0, self.width - 1),
         )
-        self.state[self.current_position] = 255
+        self.path[self.current_position] = 1
 
-    def perform_action(self, action) -> bool:
+    def perform_action(self, action: AgentAction) -> bool:
         if action == AgentAction.LEFT:
             self.current_position = (
                 self.current_position[0],
@@ -59,11 +64,17 @@ class SegmentationAgent:
                 min(self.height - 1, self.current_position[0] + 1),
                 self.current_position[1],
             )
+        elif action == AgentAction.CLASSIFY:
+            self.state[self.current_position] = self.classify()
 
+        self.path[self.current_position] = 1
         return self.is_done()
 
+    def classify(self):
+        return random.choice([1, 2])
+
     def is_done(self):
-        return self.labels[self.current_position] == PicturePixel.OBJECT.value
+        return self.labels[self.current_position] == self.state[self.current_position]
 
     def render(self):
         pygame.init()
@@ -92,7 +103,7 @@ class SegmentationAgent:
         pygame.quit()
 
     def get_observation(self):
-        observation = self.state.clone()
-        x, y = self.current_position
-        observation[x, y] = 255
-        return observation
+        return self.state.copy(), self.path.copy()
+
+    def get_position(self):
+        return self.current_position

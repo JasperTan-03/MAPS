@@ -1,78 +1,96 @@
+import agent
 import gymnasium as gym
+import matplotlib.pyplot as plt
 import numpy as np
+import torch
+from gymnasium.envs.registration import register
 from gymnasium.spaces import Box, Discrete
+from gymnasium.utils.env_checker import check_env
+
+# Register this module as a custom environment
+register(
+    id="Segmentation-v0",
+    entry_point="rl_environment:SegmentationEnv",
+    # max_episode_steps=100,
+)
 
 
 class SegmentationEnv(gym.Env):
-    def __init__(self, image, labels):
-        super(SegmentationEnv, self).__init__()
+    def __init__(self, image, labels, step_limit=100):
         self.image = image  # Input image to be segmented
         self.labels = labels  # Ground truth labels for segmentation
         self.height, self.width = image.shape[:2]
-        self.state = None
+        self.step_limit = step_limit
+        self.num_steps = 0
+        self.obs = None
 
-        # Action space: 5 actions (4 directions + 1 classification)
+        # Initialize agent
+        self.agent = agent.SegmentationAgent(self.height, self.width, labels)
+
+        # Action space: 5 actions (4 directions)
         self.action_space = Discrete(5)
 
-        # State space: position and pixel features
+        # Observation space: 2D image with agent's position highlighted
         self.observation_space = Box(
-            low=0, high=255, shape=(self.height, self.width, 4), dtype=np.uint8
+            low=0, high=1, shape=(self.height, self.width), dtype=np.uint8
         )
 
-    def reset(self):
-        # Initialize agent positions and labeled image
-        self.state = np.zeros((self.height, self.width))  # Agent state
-        self.current_position = (
-            np.random.randint(self.height),
-            np.random.randint(self.width),
-        )
-        return self.state
+    def reset(self, seed=None):
+        super().reset(seed=seed)
+
+        # Reset agent
+        self.agent.reset(seed=seed)
+
+        # Reset obs
+        state, path = self.agent.get_observation()
+        self.obs = {"state": state, "path": path}
+
+        return self.obs
 
     def step(self, action):
-        reward = 0
-        done = False
+        done = False if self.num_steps < self.step_limit else True
 
-        # Parse action
-        if action == 0:  # Classify pixel
-            label = self.classify(self.current_position)
-            if label == self.labels[self.current_position]:  # Correct classification
-                reward += 1
-            else:
-                reward -= 1
-        else:  # Move agent
-            self.move(action)
+        # Perform action
+        reward = self.agent.perform_action(agent.AgentAction(action))
+        self.num_steps += 1
 
-        # Check if episode is done
-        if self.is_done():
-            done = True
+        # Update observation
+        state, path = self.agent.get_observation()
+        self.obs = {"state": state, "path": path}
 
-        # Next observation
-        observation = self.get_observation()
-        return observation, reward, done, {}
+        # Additional Info
+        info = {}
 
-    def classify(self, position):
-        # Placeholder for classification model
-        return np.random.choice([0, 1])  # Classify as object (1) or background (0)
+        return self.obs, reward, done, info
 
-    def move(self, direction):
-        # Move agent in the given direction
-        x, y = self.current_position
-        if direction == 1:  # Up
-            self.current_position = (max(0, x - 1), y)
-        elif direction == 2:  # Down
-            self.current_position = (min(self.height - 1, x + 1), y)
-        elif direction == 3:  # Left
-            self.current_position = (x, max(0, y - 1))
-        elif direction == 4:  # Right
-            self.current_position = (x, min(self.width - 1, y + 1))
+    def render(self):
+        self.agent.render()
 
-    def get_observation(self):
-        # Return current image with agent's position highlighted
-        observation = self.state.copy()
-        x, y = self.current_position
-        observation[x, y] = 255  # Mark agent position
-        return observation
 
-    def is_done(self):
-        # Check termination conditions
-        return np.all(self.state > 0)
+if __name__ == "__main__":
+    random_image = torch.randint(0, 2, (1000, 1000))
+    random_labels = torch.randint(0, 2, (1000, 1000))
+    print("start")
+    env = gym.make(
+        "Segmentation-v0", image=random_image, labels=random_labels, step_limit=100000
+    )
+    # print("initialize")
+
+    obs = env.reset()
+    # print("starting state:", obs["state"])
+
+    while True:
+        action = env.action_space.sample()
+        # print(action)
+        obs, reward, done, info = env.step(action)
+        # env.render()
+
+        if done:
+            break
+
+    # Display the final state
+    plt.imshow(obs["state"])
+    plt.show()
+
+    plt.imshow(obs["path"])
+    plt.show()
