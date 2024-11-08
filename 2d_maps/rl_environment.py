@@ -28,7 +28,7 @@ class SegmentationEnv(gym.Env):
         self.agent = agent.SegmentationAgent(self.height, self.width, labels)
 
         # Action space: 5 actions (4 directions)
-        self.action_space = Discrete(5)
+        self.action_space = Discrete(4)
 
         # Observation space: 2D image with agent's position highlighted
         self.observation_space = Box(
@@ -68,11 +68,11 @@ class SegmentationEnv(gym.Env):
 
 
 if __name__ == "__main__":
-    random_image = torch.randint(0, 2, (1000, 1000))
-    random_labels = torch.randint(0, 2, (1000, 1000))
+    random_image = torch.randint(0, 2, (100, 100))
+    random_labels = torch.randint(0, 2, (100, 100))
     print("start")
     env = gym.make(
-        "Segmentation-v0", image=random_image, labels=random_labels, step_limit=100000
+        "Segmentation-v0", image=random_image, labels=random_labels, step_limit=1000
     )
     # print("initialize")
 

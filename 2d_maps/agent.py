@@ -14,12 +14,6 @@ class AgentAction(Enum):
     CLASSIFY = 4
 
 
-class PixelClass(Enum):
-    UNCLASSIFIED = 0
-    BACKGROUND = 1
-    OBJECT = 2
-
-
 class SegmentationAgent:
     def __init__(self, height, width, labels):
         self.height = height
@@ -64,8 +58,7 @@ class SegmentationAgent:
                 min(self.height - 1, self.current_position[0] + 1),
                 self.current_position[1],
             )
-        elif action == AgentAction.CLASSIFY:
-            self.state[self.current_position] = self.classify()
+        self.state[self.current_position] = self.classify()
 
         self.path[self.current_position] = 1
         return self.is_done()
