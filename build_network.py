@@ -1,4 +1,5 @@
 import argparse
+import os
 
 import numpy as np
 import pandas as pd
@@ -10,6 +11,7 @@ from torch_geometric.data import Data
 from torch_geometric.nn import knn_graph
 from torch_geometric.utils import is_undirected, to_undirected, subgraph
 from torch_geometric.utils import structured_negative_sampling_feasible
+import os
 
 def get_memory_usage():
     """Get current memory usage statistics."""
@@ -128,8 +130,32 @@ if __name__ == "__main__":
         type=str,
         default="data/bildstein_station1_xyz_intensity_rgb.txt",
     )
+    parser.add_argument(
+        "--chunk_size",
+        type=int,
+        default=1000000,
+    )
+    parser.add_argument(
+        "--save",
+        type=bool,
+        default=False,
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="data",
+    )
+
     args = parser.parse_args()
 
     data = args.point_cloud
+    chunk_size = args.chunk_size
+    output_dir = args.output_dir
 
-    graph = load_and_process_point_cloud(data, chunk_size=10000, k=5)
+    graph = load_and_process_point_cloud(data, chunk_size=chunk_size, k=5)
+
+    if args.save:
+        input_filename = os.path.basename(data)
+        save_filename = os.path.join(output_dir, f"{os.path.splitext(input_filename)[0]}.pt")
+        save_graph(graph, save_filename)
+        print(f"Graph saved to {save_filename}")
