@@ -2,7 +2,6 @@ import argparse
 
 import numpy as np
 import pandas as pd
-import networkx as nx
 from sklearn.neighbors import KDTree
 from tqdm import tqdm
 import torch
@@ -117,8 +116,9 @@ def load_and_process_point_cloud(filename, chunk_size=1000000, k=5):
 
     return graph_data
 
-def save_graph(graph, filename):
-    nx.write_gexf(graph, filename)
+def save_graph(graph_data, filename):
+    """Save PyG Data object to a file."""
+    torch.save(graph_data, filename)
 
 
 if __name__ == "__main__":
