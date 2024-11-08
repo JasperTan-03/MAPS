@@ -1,29 +1,49 @@
 name: maps
 channels:
-  - conda-forge
   - pytorch
   - nvidia
+  - conda-forge
+  - defaults
 dependencies:
-  - python==3.10
-  - pip
+  # Core Python and CUDA
+  - python=3.10
+  - cudatoolkit=11.8
+  
+  # PyTorch ecosystem
   - pytorch
   - pytorch-cuda=11.8
-  - cudatoolkit=11.8
-  - bitsandbytes
-  - peft
+  - torchvision
+  - torchaudio
+  - torchmetrics
+  
+  # Scientific computing
   - numpy
   - pandas
   - scikit-learn
+  - networkx
+  
+  # Deep Learning tools
   - transformers
+  - bitsandbytes
+  - peft
   - sentencepiece
   - protobuf
   - wandb
   - datasets
-  - ipykernel
+  
+  # Utilities
   - tqdm
+  - ipykernel
   - pytables
-  - torchmetrics
+  - h5py
   - gym
-  - networkx
+  
+  - pip
   - pip:
+    # Dependencies that are better installed via pip
     - flash-attn
+    - torch-geometric
+    - torch-scatter
+    - torch-sparse
+    - torch-cluster
+    - torch-spline-conv
