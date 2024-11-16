@@ -1,5 +1,6 @@
 import random
 from enum import Enum
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import pygame
@@ -11,63 +12,96 @@ class AgentAction(Enum):
     RIGHT = 1
     UP = 2
     DOWN = 3
-    CLASSIFY = 4
 
 
 class SegmentationAgent:
-    def __init__(self, height, width, labels):
+    def __init__(self, height: int, width: int, labels: np.ndarray):
         self.height = height
         self.width = width
 
+        self.labels = labels
         self.state = None
         self.path = None
         self.current_position = None
-        self.labels = labels
+        self.visited_positions = set()
 
         self.reset()
 
-    def reset(self, seed=None):
+    def reset(self, seed: Optional[int] = None) -> Dict[str, np.ndarray]:
+        if seed is not None:
+            random.seed(seed)
+            np.random.seed(seed)
+
         self.state = np.zeros((self.height, self.width))
         self.path = np.zeros((self.height, self.width))
+        self.visited_positions = set()
 
-        random.seed(seed)
+        # Start from a random unvisited position
         self.current_position = (
             random.randint(0, self.height - 1),
             random.randint(0, self.width - 1),
         )
+        self.visited_positions.add(self.current_position)
         self.path[self.current_position] = 1
 
-    def perform_action(self, action: AgentAction) -> bool:
+        return self.get_observation()
+
+    def perform_action(self, action: AgentAction) -> float:
+        prev_position = self.current_position
+
+        # Update position based on action
         if action == AgentAction.LEFT:
-            self.current_position = (
-                self.current_position[0],
-                max(0, self.current_position[1] - 1),
-            )
+            new_pos = (prev_position[0], max(0, prev_position[1] - 1))
         elif action == AgentAction.RIGHT:
-            self.current_position = (
-                self.current_position[0],
-                min(self.width - 1, self.current_position[1] + 1),
-            )
+            new_pos = (prev_position[0], min(self.width - 1, prev_position[1] + 1))
         elif action == AgentAction.UP:
-            self.current_position = (
-                max(0, self.current_position[0] - 1),
-                self.current_position[1],
-            )
+            new_pos = (max(0, prev_position[0] - 1), prev_position[1])
         elif action == AgentAction.DOWN:
-            self.current_position = (
-                min(self.height - 1, self.current_position[0] + 1),
-                self.current_position[1],
-            )
-        self.state[self.current_position] = self.classify()
+            new_pos = (min(self.height - 1, prev_position[0] + 1), prev_position[1])
 
+        self.current_position = new_pos
+        self.visited_positions.add(self.current_position)
+
+        # Classify the current position
+        prediction = self.classify()
+        self.state[self.current_position] = prediction
         self.path[self.current_position] = 1
-        return self.is_done()
+
+        # Calculate reward
+        reward = self.calculate_reward(prediction)
+        return reward
 
     def classify(self):
-        return random.choice([1, 2])
+        # Get the true label for the current position
+        true_label = self.labels[self.current_position]
 
-    def is_done(self):
-        return self.labels[self.current_position] == self.state[self.current_position]
+        # Add some noise to make it more realistic
+        noise = np.random.random() < 0.5
+        return 1 - true_label if noise else true_label
+
+    def calculate_reward(self, prediction: int) -> float:
+        true_label = self.labels[self.current_position]
+
+        # Higher reward for correct classification
+        if prediction == true_label:
+            reward = 1.0
+        else:
+            reward = -0.5
+
+        if (
+            len(self.visited_positions) > 1
+            and self.current_position in self.visited_positions
+        ):
+            reward -= 0.25
+
+        return reward
+
+    def get_observation(self) -> Dict[str, np.ndarray]:
+        return {
+            "state": self.state.copy(),
+            "path": self.path.copy(),
+            "position": np.array(self.current_position),
+        }
 
     def render(self):
         pygame.init()
@@ -94,9 +128,6 @@ class SegmentationAgent:
             pygame.display.flip()
 
         pygame.quit()
-
-    def get_observation(self):
-        return self.state.copy(), self.path.copy()
 
     def get_position(self):
         return self.current_position
