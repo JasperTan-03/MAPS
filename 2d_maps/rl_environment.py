@@ -53,7 +53,7 @@ class SegmentationEnv(gym.Env):
         self.fig = None
         self.ax = None
 
-    def reset(self, seed=None) -> Dict[str, np.ndarray]:
+    def reset(self, seed: Optional[int] = None) -> Dict[str, np.ndarray]:
         super().reset(seed=seed)
         self.num_steps = 0
         return self.agent.reset(seed=seed)
