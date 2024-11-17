@@ -15,6 +15,8 @@ from torch_geometric.utils import (
     to_undirected,
 )
 from tqdm import tqdm
+from PIL import Image
+
 
 def get_memory_usage():
     """Get current memory usage statistics."""
@@ -57,6 +59,7 @@ def print_memory_stats(memory_stats, step=""):
         print(f"  Reserved:  {memory_stats['gpu_stats']['reserved']:.2f}GB")
         print(f"  Max Allocated: {memory_stats['gpu_stats']['max_allocated']:.2f}GB")
 
+
 def load_and_process_point_cloud(filename, chunk_size=1000000, k=5):
     edge_index_list = []
     node_attr_list = []
@@ -77,7 +80,8 @@ def load_and_process_point_cloud(filename, chunk_size=1000000, k=5):
         colors = chunk.iloc[:, 3:].values  # Extract intensity, R, G, B values
 
         # Combine point and color information as node attributes
-        node_attrs = np.hstack((points, colors))
+        labels = np.zeros((points.shape[0], 1))  # Add label column with all zeros
+        node_attrs = np.hstack((points, colors, labels))
         node_attrs = torch.tensor(node_attrs, dtype=torch.float)
 
         # Move to GPU if available
@@ -129,6 +133,61 @@ def load_and_process_point_cloud(filename, chunk_size=1000000, k=5):
 
     return graph_data
 
+
+def load_and_process_image(filename, k=5):
+    image = Image.open(filename)
+    image = image.convert("RGB")
+    width, height = image.size
+
+    node_attr_list = []
+    edge_index_list = []
+
+    print_memory_stats(get_memory_usage(), "Initial State")
+
+    print("Loading and processing image...")
+    for y in range(height):
+        for x in range(width):
+            r, g, b = image.getpixel((x, y))
+            node_attrs = [x, y, 0, r, g, b, 0]  # x, y, z, r, g, b, label
+            node_attr_list.append(node_attrs)
+
+            # Create edges to neighboring pixels
+            for dx in range(-1, 2):
+                for dy in range(-1, 2):
+                    if dx == 0 and dy == 0:
+                        continue
+                    if dx != 0 and dy != 0:
+                        continue
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < width and 0 <= ny < height:
+                        edge_index_list.append([y * width + x, ny * width + nx])
+
+    node_attrs = torch.tensor(node_attr_list, dtype=torch.float)
+    edge_index = torch.tensor(edge_index_list, dtype=torch.long).t().contiguous()
+
+    if torch.cuda.is_available():
+        node_attrs = node_attrs.cuda()
+        edge_index = edge_index.cuda()
+
+    print_memory_stats(get_memory_usage(), "After Processing Image")
+
+    if not is_undirected(edge_index):
+        edge_index = to_undirected(edge_index)
+
+    graph_data = Data(x=node_attrs, edge_index=edge_index)
+
+    is_connected = structured_negative_sampling_feasible(edge_index)
+
+    print("\nProcessing complete.")
+    print(f"Total points (nodes): {len(node_attr_list)}")
+    print(f"Total edges: {edge_index.size(1)}")
+    print(f"Graph is {'connected' if is_connected else 'disconnected'}.")
+
+    print_memory_stats(get_memory_usage(), "Final State")
+
+    return graph_data
+
+
 def save_graph(graph_data, filename):
     """Save PyG Data object to a file."""
     torch.save(graph_data, filename)
@@ -156,6 +215,11 @@ if __name__ == "__main__":
         type=str,
         default="data",
     )
+    parser.add_argument(
+        "--image",
+        type=str,
+        default=None,
+    )
 
     args = parser.parse_args()
 
@@ -163,7 +227,10 @@ if __name__ == "__main__":
     chunk_size = args.chunk_size
     output_dir = args.output_dir
 
-    graph = load_and_process_point_cloud(data, chunk_size=chunk_size, k=5)
+    if args.image:
+        graph = load_and_process_image(args.image, k=5)
+    else:
+        graph = load_and_process_point_cloud(data, chunk_size=chunk_size, k=5)
 
     if args.save:
         input_filename = os.path.basename(data)

@@ -2,6 +2,7 @@ name: maps
 channels:
   - conda-forge
   - pytorch
+  - defaults
 dependencies:
   - python==3.10
   - pip
@@ -24,3 +25,5 @@ dependencies:
   - stable-baselines3
   - pip:
     - shimmy>=0.2.1
+
+    - torch-geometric
