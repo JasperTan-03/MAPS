@@ -137,6 +137,10 @@ def save_graph(graph_data, filename):
     torch.save(graph_data, filename)
 
 
+def save_graph(graph, filename):
+    nx.write_gexf(graph, filename)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
