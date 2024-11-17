@@ -60,7 +60,7 @@ def print_memory_stats(memory_stats, step=""):
         print(f"  Max Allocated: {memory_stats['gpu_stats']['max_allocated']:.2f}GB")
 
 
-def load_and_process_point_cloud(filename, chunk_size=1000000, k=5):
+def build_point_cloud_network(filename, chunk_size=1000000, k=5):
     edge_index_list = []
     node_attr_list = []
     label_list = []
@@ -138,7 +138,7 @@ def load_and_process_point_cloud(filename, chunk_size=1000000, k=5):
     return graph_data
 
 
-def load_and_process_image(filename, k=5):
+def build_image_network(filename, k=5):
     image = Image.open(filename)
     image = image.convert("RGB")
     width, height = image.size
@@ -236,9 +236,9 @@ if __name__ == "__main__":
     output_dir = args.output_dir
 
     if args.image:
-        graph = load_and_process_image(args.image, k=5)
+        graph = build_image_network(args.image, k=5)
     else:
-        graph = load_and_process_point_cloud(data, chunk_size=chunk_size, k=5)
+        graph = build_point_cloud_network(data, chunk_size=chunk_size, k=5)
 
     if args.save:
         input_filename = os.path.basename(data)
