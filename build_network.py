@@ -16,7 +16,6 @@ from torch_geometric.utils import (
 )
 from tqdm import tqdm
 
-
 def get_memory_usage():
     """Get current memory usage statistics."""
     # System memory
@@ -57,7 +56,6 @@ def print_memory_stats(memory_stats, step=""):
         print(f"  Allocated: {memory_stats['gpu_stats']['allocated']:.2f}GB")
         print(f"  Reserved:  {memory_stats['gpu_stats']['reserved']:.2f}GB")
         print(f"  Max Allocated: {memory_stats['gpu_stats']['max_allocated']:.2f}GB")
-
 
 def load_and_process_point_cloud(filename, chunk_size=1000000, k=5):
     edge_index_list = []
@@ -131,14 +129,9 @@ def load_and_process_point_cloud(filename, chunk_size=1000000, k=5):
 
     return graph_data
 
-
 def save_graph(graph_data, filename):
     """Save PyG Data object to a file."""
     torch.save(graph_data, filename)
-
-
-def save_graph(graph, filename):
-    nx.write_gexf(graph, filename)
 
 
 if __name__ == "__main__":
