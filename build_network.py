@@ -63,61 +63,65 @@ def print_memory_stats(memory_stats, step=""):
 def load_and_process_point_cloud(filename, chunk_size=1000000, k=5):
     edge_index_list = []
     node_attr_list = []
+    label_list = []
     total_points = 0
-
+    
     # Initial memory state
     print_memory_stats(get_memory_usage(), "Initial State")
-
+    
     print("Loading and processing point cloud in chunks...")
-    for i, chunk in enumerate(
-        tqdm(pd.read_csv(filename, sep=" ", header=None, chunksize=chunk_size))
-    ):
+    for i, chunk in enumerate(tqdm(pd.read_csv(filename, sep=" ", header=None, chunksize=chunk_size))):
         # Memory before processing chunk
         if i % 5 == 0:  # Print every 5 chunks to avoid too much output
             print_memory_stats(get_memory_usage(), f"Before Processing Chunk {i}")
-
+            
         points = chunk.iloc[:, :3].values  # Extract x, y, z coordinates
         colors = chunk.iloc[:, 3:].values  # Extract intensity, R, G, B values
-
+        # temporary value for label of node classifation label is 0 for now
+        labels = np.zeros((points.shape[0], 1))
+        
+        
         # Combine point and color information as node attributes
-        labels = np.zeros((points.shape[0], 1))  # Add label column with all zeros
-        node_attrs = np.hstack((points, colors, labels))
+        node_attrs = np.hstack((points, colors))
         node_attrs = torch.tensor(node_attrs, dtype=torch.float)
-
+        labels = torch.tensor(labels, dtype=torch.long)
+        
         # Move to GPU if available
         if torch.cuda.is_available():
             node_attrs = node_attrs.cuda()
-
+        
         # Create edges with KNN and add to list
         edge_index = knn_graph(node_attrs[:, :3], k=k, loop=False)
-
+        
         # Append current chunk results
         edge_index_list.append(edge_index)
         node_attr_list.append(node_attrs)
-
+        label_list.append(labels)
+        
         total_points += node_attrs.shape[0]
-
+        
         # Memory after processing chunk
         if i % 5 == 0:  # Print every 5 chunks
             print_memory_stats(get_memory_usage(), f"After Processing Chunk {i}")
-
+    
     print("\nConcatenating results...")
     # Memory before concatenation
     print_memory_stats(get_memory_usage(), "Before Concatenation")
-
+    
     # Concatenate edges and node attributes from all chunks
     edge_index = torch.cat(edge_index_list, dim=1)
     node_attrs = torch.cat(node_attr_list, dim=0)
-
+    labels = torch.cat(label_list, dim=0)
+    
     # Memory after concatenation
     print_memory_stats(get_memory_usage(), "After Concatenation")
-
+    
     # Make sure the edge index is undirected for connectivity check
     if not is_undirected(edge_index):
         edge_index = to_undirected(edge_index)
 
     # Create PyG Data object
-    graph_data = Data(x=node_attrs, edge_index=edge_index)
+    graph_data = Data(x=node_attrs, edge_index=edge_index, y=labels)
 
     # Check if the graph is connected using structured_negative_sampling_feasible
     is_connected = structured_negative_sampling_feasible(edge_index)
@@ -127,7 +131,7 @@ def load_and_process_point_cloud(filename, chunk_size=1000000, k=5):
     print(f"Total points (nodes): {total_points}")
     print(f"Total edges: {edge_index.size(1)}")
     print(f"Graph is {'connected' if is_connected else 'disconnected'}.")
-
+    
     # Final memory state
     print_memory_stats(get_memory_usage(), "Final State")
 
@@ -141,6 +145,7 @@ def load_and_process_image(filename, k=5):
 
     node_attr_list = []
     edge_index_list = []
+    label_list = []
 
     print_memory_stats(get_memory_usage(), "Initial State")
 
@@ -148,8 +153,9 @@ def load_and_process_image(filename, k=5):
     for y in range(height):
         for x in range(width):
             r, g, b = image.getpixel((x, y))
-            node_attrs = [x, y, 0, r, g, b, 0]  # x, y, z, r, g, b, label
+            node_attrs = [x, y, 0, r, g, b]
             node_attr_list.append(node_attrs)
+            label_list.append([0])  # Use y as the label for the node
 
             # Create edges to neighboring pixels
             for dx in range(-1, 2):
@@ -164,17 +170,19 @@ def load_and_process_image(filename, k=5):
 
     node_attrs = torch.tensor(node_attr_list, dtype=torch.float)
     edge_index = torch.tensor(edge_index_list, dtype=torch.long).t().contiguous()
+    labels = torch.tensor(label_list, dtype=torch.long)
 
     if torch.cuda.is_available():
         node_attrs = node_attrs.cuda()
         edge_index = edge_index.cuda()
+        labels = labels.cuda()
 
     print_memory_stats(get_memory_usage(), "After Processing Image")
 
     if not is_undirected(edge_index):
         edge_index = to_undirected(edge_index)
 
-    graph_data = Data(x=node_attrs, edge_index=edge_index)
+    graph_data = Data(x=node_attrs, edge_index=edge_index, y=labels)
 
     is_connected = structured_negative_sampling_feasible(edge_index)
 
