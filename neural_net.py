@@ -156,11 +156,8 @@ class DuelingGraphDQN(nn.Module):
         nav_value = self.nav_value(current_node_features)
         nav_advantage = self.nav_advantage(current_node_features)
         nav_logits = nav_value + (nav_advantage - nav_advantage.mean(dim=-1, keepdim=True))
-        
         # Apply action mask
         if 'valid_actions_mask' in state:
             nav_logits[~state['valid_actions_mask']] = float('-inf')
-
-        print(cls_logits.shape, nav_logits.shape)
             
         return cls_logits, nav_logits

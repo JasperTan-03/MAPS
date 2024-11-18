@@ -50,7 +50,7 @@ class GraphSegmentationEnv(gym.Env):
             'valid_actions_mask': spaces.Box(
                 low=0,
                 high=1,
-                shape=(4),
+                shape=(4,),
                 dtype=np.int8
             ),
             # 'segmentation_mask': spaces.Box(
@@ -76,21 +76,23 @@ class GraphSegmentationEnv(gym.Env):
         
         # Reset environment state
         self.steps = 0
-        self.current_node = self.np_random.integers(0, self.num_nodes)
+        self.current_node = torch.randint(0, self.num_nodes, (1,)).item()
         # self.segmentation_mask = np.zeros(self.num_nodes, dtype=np.int64)
         
         observation = self._get_observation()
-        self.visited_nodes = set(self.current_node)
+        self.visited_nodes = set([self.current_node])
         
         return observation
         
     def _get_valid_actions_mask(self) -> np.ndarray:
         """Create a mask for valid navigation actions at current state."""
         # Get neighboring nodes
-        cur_x, cur_y = self.graph.x[self.current_node][:2]
-        max_x, max_y = self.graph.x[-1][:2]
+        cur_loc = self.graph.x[self.current_node][:2]
+        cur_x, cur_y = cur_loc[0].item(), cur_loc[1].item()
+        max_loc = self.graph.x[-1][:2]
+        max_x, max_y = max_loc[0].item(), max_loc[1].item()
 
-        mask = torch.zeros(4, dtype=np.int8)
+        mask = torch.zeros(4, dtype=torch.bool)
 
         # Check if we can move left
         if cur_y > 0:
