@@ -9,10 +9,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import wandb
 import yaml
 
 from neural_net import DuelingGraphDQN, ReplayBuffer
-from rl_environment import SegmentationEnv
+from rl_environment import GraphSegmentationEnv
 
 
 class GraphDQNAgent:
@@ -28,6 +29,13 @@ class GraphDQNAgent:
     ):
         args = yaml.safe_load(open("configs/agent.yaml", "r"))
         args = args["dqn-agent"]
+
+        # Initialize wandb
+        wandb.init(
+            project="graph-dqn-segmentation",
+            name=args["name"],
+            config=args,
+        )
 
         self.seed = random.seed(args["random_seed"])
         self.device = device
@@ -209,6 +217,21 @@ class GraphDQNAgent:
                 nav_loss = criterion(expected_nav_q, nav_rewards)
                 total_loss = cls_loss + nav_loss
 
+                # Log metrics to wandb
+                wandb.log(
+                    {
+                        "step": self.t_step,
+                        "classification_reward": cls_rewards[cls_action],
+                        "navigation_reward": nav_rewards[nav_action],
+                        "total_reward": cls_rewards[cls_action]
+                        + nav_rewards[nav_action],
+                        "classification_loss": cls_loss.item(),
+                        "navigation_loss": nav_loss.item(),
+                        "total_loss": total_loss.item(),
+                        "epsilon": self.epsilon,
+                    }
+                )
+
                 # Optimize the model
                 self.optimizer.zero_grad()
                 total_loss.backward()
@@ -266,6 +289,16 @@ class GraphDQNAgent:
             episode_rewards_cls.append(episode_reward_cls)
             episode_rewards_nav.append(episode_reward_nav)
 
+            # Log episode metrics
+            wandb.log(
+                {
+                    "episode": episode,
+                    "episode_classification_reward": episode_reward_cls,
+                    "episode_navigation_reward": episode_reward_nav,
+                    "episode_total_reward": episode_reward_cls + episode_reward_nav,
+                }
+            )
+
             # Print progress
             if (episode + 1) % 10 == 0:
                 avg_reward = np.mean(episode_rewards[-10:])
@@ -278,8 +311,8 @@ class GraphDQNAgent:
                     f"Cls Reward: {episode_reward_cls:.2f} | "
                     f"Nav Reward: {episode_reward_nav:.2f}"
                 )
-
-        return episode_rewards
+        wandb.finish()
+        return episode_rewards_cls, episode_rewards_nav
 
     def plot_training_results(self, episode_rewards: List[float]):
         """
