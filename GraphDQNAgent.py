@@ -9,12 +9,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import yaml
 
 from neural_net import DuelingGraphDQN, Experience, ReplayBuffer
 from rl_environment import SegmentationEnv
-
-# Hyperparameters
-UPDATE_EVERY = 4
 
 
 class GraphDQNAgent:
@@ -26,19 +24,11 @@ class GraphDQNAgent:
         dqn_hidden_dim: int,
         num_classes: int,
         max_num_edges: int,
-        seed: int,
-        lr: float = 1e-4,
-        gamma: float = 0.99,
-        epsilon_start: float = 1.0,
-        epsilon_end: float = 0.01,
-        epsilon_decay: float = 0.995,
-        buffer_size: int = 100000,
-        batch_size: int = 32,
-        tau: float = 1e-3,
-        target_update_freq: int = 1000,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
     ):
-        self.seed = random.seed(seed)
+        args = yaml.safe_load(open("configs/agent.yaml", "r"))
+
+        self.seed = random.seed(args["seed"])
         self.device = device
 
         # Q-Networks
@@ -61,22 +51,25 @@ class GraphDQNAgent:
         ).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
 
-        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr, amsgrad=True)
+        self.optimizer = optim.Adam(
+            self.policy_net.parameters(), lr=args["lr"], amsgrad=True
+        )
 
         # Replay memory
-        self.memory = ReplayBuffer(buffer_size)
+        self.memory = ReplayBuffer(args["buffer_size"])
 
-        self.batch_size = batch_size
-        self.gamma = gamma
-        self.epsilon = epsilon_start
-        self.epsilon_end = epsilon_end
-        self.epsilon_decay = epsilon_decay
-        self.tau = tau
-        self.target_update_freq = target_update_freq
+        self.batch_size = args["batch_size"]
+        self.gamma = args["gamma"]
+        self.epsilon = args["epsilon_start"]
+        self.epsilon_end = args["epsilon_end"]
+        self.epsilon_decay = args["epsilon_decay"]
+        self.tau = args["tau"]
+        self.target_update_freq = args["target_update_freq"]
 
         # Initialize time step (for updating every UPDATE_EVERY steps)
         self.t_step = 0
         self.losses = []
+        self.update_every = args["update_every"]
 
     def select_action(self, state: Dict[str, torch.Tensor]) -> Tuple[int, int]:
         """Select an action using epsilon-greedy policy.
