@@ -36,7 +36,7 @@ dependencies:
   - ipykernel
   - pytables
   - h5py
-  - gym
+  - gymasium
   
   - pip
   - pip:
