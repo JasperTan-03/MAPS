@@ -71,7 +71,9 @@ class GraphDQNAgent:
         self.losses = []
         self.update_every = args["update_every"]
 
-    def select_action(self, state: Dict[str, torch.Tensor]) -> Tuple[int, int]:
+    def select_action(
+        self, expected_cls_q, expected_nav_q, valid_actions_mask
+    ) -> Tuple[int, int]:
         """Select an action using epsilon-greedy policy.
 
         Args:
@@ -80,28 +82,26 @@ class GraphDQNAgent:
         Returns:
             Tuple[int, int]: Chosen action
         """
-        # Move state tensors to device and add batch dimension if needed
-        state = {
-            k: v.to(self.device) if isinstance(v, torch.Tensor) else v
-            for k, v in state.items()
-        }
+        # # Move state tensors to device and add batch dimension if needed
+        # state = {
+        #     k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+        #     for k, v in state.items()
+        # }
 
         self.epsilon = self.epsilon_end + (self.epsilon - self.epsilon_end) * math.exp(
             -1.0 * self.t_step / self.epsilon_decay
         )
-        self.t_step += 1
 
         # Epsilon-greedy action selection
         if random.random() > self.epsilon:
             with torch.no_grad():
-                cls_q_values, nav_q_values = self.policy_net(state)
-                cls_action = cls_q_values.argmax(dim=1).item()
-                nav_action = nav_q_values.argmax(dim=1).item()
+                cls_action = expected_cls_q.argmax(dim=1).item()
+                nav_action = expected_nav_q.argmax(dim=1).item()
         else:
             # Random classification action
             cls_action = random.randrange(self.policy_net.cls_advantage[2].out_features)
             # Random navigation action from valid actions
-            valid_actions = torch.where(state["valid_actions_mask"][0])[0]
+            valid_actions = torch.where(valid_actions_mask)[0]
             nav_action = valid_actions[random.randrange(len(valid_actions))].item()
 
         return cls_action, nav_action
@@ -175,44 +175,95 @@ class GraphDQNAgent:
         num_episodes: int,
         max_steps: int = 1000,
     ) -> List[float]:
-        episode_rewards = []
+        episode_rewards_cls = []
+        episode_rewards_nav = []
 
         for episode in range(num_episodes):
             state = env.reset()
-            episode_reward = 0
+            episode_reward_cls = 0
+            episode_reward_nav = 0
 
             for step in range(max_steps):
                 # Select action
-                cls_action, nav_action = self.select_action(state)
-
-                # Take action
-                next_state, reward, done, _ = env.step((cls_action, nav_action))
-                episode_reward += reward
-
-                # Store experience
-                self.memory.push(
-                    state, nav_action, cls_action, next_state, reward, done
+                expected_cls_q, expected_nav_q = self.policy_net(state)
+                cls_action, nav_action = self.select_action(
+                    expected_cls_q=expected_cls_q,
+                    expected_nav_q=expected_nav_q,
+                    valid_actions_mask=state["valid_actions_mask"],
                 )
-                state = next_state
 
-                # Optimize model
-                loss = self.optimize_model()
-                if loss is not None:
-                    self.losses.append(loss)
+                next_step, rewards, done, _ = env.step(cls_action, nav_action)
 
-                # Soft update of the target network's weight
-                target_net_state_dict = self.target_net.state_dict()
-                policy_net_state_dict = self.policy_net.state_dict()
-                for key in policy_net_state_dict:
-                    target_net_state_dict[key] = policy_net_state_dict[
-                        key
-                    ] * self.tau + target_net_state_dict[key] * (1 - self.tau)
-                self.target_net.load_state_dict(target_net_state_dict)
+                # Unpack rewards
+                cls_rewards = rewards["cls"]
+                nav_rewards = rewards["nav"]
+
+                # Add rewards
+                episode_reward_cls += cls_rewards[cls_action]
+                episode_reward_nav += nav_rewards[nav_action]
+
+                # Compute Loss
+                criterion = nn.SmoothL1Loss()
+                cls_loss = criterion(expected_cls_q, cls_rewards)
+                nav_loss = criterion(expected_nav_q, nav_rewards)
+                total_loss = cls_loss + nav_loss
+
+                # Optimize the model
+                self.optimizer.zero_grad()
+                total_loss.backward()
+
+                # Gradient clipping
+                torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
+                self.optimizer.step()
+                state = next_step
+                self.t_step += 1
 
                 if done:
                     break
 
-            episode_rewards.append(episode_reward)
+                # actions = {"cls": cls_action, "nav": nav_action}
+                # # Take action
+                # next_state, rewards, done, _ = env.step(actions)
+
+                # # Unpack rewards
+                # cls_rewards = rewards["cls"]
+                # nav_rewards = rewards["nav"]
+
+                # # Add rewards
+                # episode_reward_cls += cls_rewards[cls_action]
+                # episode_reward_nav += nav_rewards[nav_action]
+
+                # # Store experience
+                # self.memory.push(
+                #     state,
+                #     nav_action,
+                #     cls_action,
+                #     next_state,
+                #     nav_rewards,
+                #     cls_rewards,
+                #     done,
+                # )
+                # state = next_state
+
+                # # Optimize model
+                # loss = self.optimize_model()
+                # if loss is not None:
+                #     self.losses.append(loss)
+
+                # # Soft update of the target network's weight
+                # target_net_state_dict = self.target_net.state_dict()
+                # policy_net_state_dict = self.policy_net.state_dict()
+                # for key in policy_net_state_dict:
+                #     target_net_state_dict[key] = policy_net_state_dict[
+                #         key
+                #     ] * self.tau + target_net_state_dict[key] * (1 - self.tau)
+                # self.target_net.load_state_dict(target_net_state_dict)
+
+                # if done:
+                #     break
+
+            episode_rewards_cls.append(episode_reward_cls)
+            episode_rewards_nav.append(episode_reward_nav)
 
             # Print progress
             if (episode + 1) % 10 == 0:
@@ -222,7 +273,9 @@ class GraphDQNAgent:
                     f"Episode {episode + 1}/{num_episodes} | "
                     f"Avg Reward: {avg_reward:.2f} | "
                     f"Avg Loss: {avg_loss:.4f} | "
-                    f"Epsilon: {self.epsilon:.2f}"
+                    f"Epsilon: {self.epsilon:.2f} | "
+                    f"Cls Reward: {episode_reward_cls:.2f} | "
+                    f"Nav Reward: {episode_reward_nav:.2f}"
                 )
 
         return episode_rewards
