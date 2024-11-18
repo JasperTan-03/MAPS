@@ -11,7 +11,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import yaml
 
-from neural_net import DuelingGraphDQN, Experience, ReplayBuffer
+from neural_net import DuelingGraphDQN, ReplayBuffer
 from rl_environment import SegmentationEnv
 
 
@@ -116,8 +116,7 @@ class GraphDQNAgent:
             return None
 
         # Sample a batch of experiences
-        experiences = self.memory.sample(self.batch_size)
-        batch = Experience(*zip(*experiences))
+        batch = self.memory.sample(self.batch_size)
 
         # Separate experiences into batches
         non_final_mask = torch.tensor(
