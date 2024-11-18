@@ -138,11 +138,10 @@ def build_point_cloud_network(filename, chunk_size=1000000, k=5):
     return graph_data
 
 
-def build_image_network(raw_filename, labled_filename):
+def build_image_network(raw_filename, labeled_filename):
     image = Image.open(raw_filename)
-    labeled_image = Image.open(labled_filename)
-    labeled_image = np.array(labeled_image)
     image = image.convert("RGB")
+    labeled_image = Image.open(labeled_filename)
     width, height = image.size
 
     node_attr_list = []
@@ -150,14 +149,14 @@ def build_image_network(raw_filename, labled_filename):
     label_list = []
 
     print_memory_stats(get_memory_usage(), "Initial State")
-
+    print("Image size:", image.size)
     print("Loading and processing image...")
     for y in range(height):
         for x in range(width):
             r, g, b = image.getpixel((x, y))
             node_attrs = [x, y, 0, r, g, b]
             node_attr_list.append(node_attrs)
-            label_list.append(labeled_image[height][width])  # Use y as the label for the node
+            label_list.append(labeled_image.getpixel((x,y)))  # Use y as the label for the node
 
             # Create edges to neighboring pixels
             for dx in range(-1, 2):
@@ -202,54 +201,3 @@ def save_graph(graph_data, filename):
     """Save PyG Data object to a file."""
     torch.save(graph_data, filename)
 
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--type",
-        type=str,
-        default="image",
-    )
-    parser.add_argument(
-        "--raw_image",
-        type=str,
-        default=None,
-    )
-    parser.add_argument(
-        "--labeled_image",
-        type=str,
-        default=None,
-    )
-    parser.add_argument(
-        "--chunk_size",
-        type=int,
-        default=1000000,
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="data",
-    )
-
-    args = parser.parse_args()
-
-    type = args.type
-    raw_image = args.raw_image
-    labeled_image = args.labeled_image
-    output_dir = args.output_dir
-    chunk_size = args.chunk_size
-
-
-
-    if type == "image":
-        graph = build_image_network(raw_filename=raw_image, labled_filename=labeled_image)
-    elif type == "point_cloud":
-        graph = build_point_cloud_network(raw_image, chunk_size=chunk_size, k=5)
-    else:
-        raise ValueError(f"Invalid type: {type}")
-
-    input_filename = os.path.basename(raw_image)
-    base_filename = input_filename.rsplit('_', 1)[0]  # Split at the last underscore
-    save_filename = os.path.join(output_dir, f"{base_filename}.pt")
-    save_graph(graph, save_filename)
-    print(f"Graph saved to {save_filename}")
