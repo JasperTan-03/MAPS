@@ -69,9 +69,15 @@ class GraphSegmentationEnv(gym.Env):
 
     def reset(
         self, 
+        new_graph: Optional[Data] = None,
         seed: Optional[int] = None, 
         options: Optional[Dict] = None
     ) -> Tuple[Dict, Dict]:
+        
+        if new_graph is not None:
+            self.graph = new_graph
+            self.num_nodes = new_graph.x.size(0)
+
         super().reset(seed=seed)
         
         # Reset environment state
@@ -159,7 +165,7 @@ class GraphSegmentationEnv(gym.Env):
                 else:
                     navigation_reward[0] = 1
 
-                self.current_node = neighbor
+                self.current_node = neighbor.item()
 
             elif action_nav == 1 and neighbor_x == cur_x + 1:
                 if neighbor in self.visited_nodes:
@@ -167,7 +173,7 @@ class GraphSegmentationEnv(gym.Env):
                 else:
                     navigation_reward[1] = 1
 
-                self.current_node = neighbor
+                self.current_node = neighbor.item()
 
             elif action_nav == 2 and neighbor_y == cur_y - 1:
                 if neighbor in self.visited_nodes:
@@ -175,7 +181,7 @@ class GraphSegmentationEnv(gym.Env):
                 else:
                     navigation_reward[2] = 1
 
-                self.current_node = neighbor
+                self.current_node = neighbor.item()
 
             elif action_nav == 3 and neighbor_y == cur_y + 1:
                 if neighbor in self.visited_nodes:
@@ -183,7 +189,7 @@ class GraphSegmentationEnv(gym.Env):
                 else:
                     navigation_reward[3] = 1
 
-                self.current_node = neighbor
+                self.current_node = neighbor.item()
 
         # Add current node to visited nodes
         self.visited_nodes.add(self.current_node)
