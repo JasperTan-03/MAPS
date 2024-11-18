@@ -1,9 +1,5 @@
-name: "gcn-dqn 2d"
-random_seed: 42
-batch_size: 32
-update_every: 4
-
 dqn-agent:
+  name: "gcn-dqn 2d"
   lr: 1e-4
   gamma: 0.99
   epsilon_start: 1.0
@@ -12,3 +8,6 @@ dqn-agent:
   target_update_freq: 1000
   replay_buffer_size: 10000
   tau: 1e-3
+  update_every: 4
+  batch_size: 32
+  random_seed: 42

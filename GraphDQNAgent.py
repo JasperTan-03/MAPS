@@ -27,8 +27,9 @@ class GraphDQNAgent:
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
     ):
         args = yaml.safe_load(open("configs/agent.yaml", "r"))
+        args = args["dqn-agent"]
 
-        self.seed = random.seed(args["seed"])
+        self.seed = random.seed(args["random_seed"])
         self.device = device
 
         # Q-Networks
@@ -56,7 +57,7 @@ class GraphDQNAgent:
         )
 
         # Replay memory
-        self.memory = ReplayBuffer(args["buffer_size"])
+        self.memory = ReplayBuffer(args["replay_buffer_size"])
 
         self.batch_size = args["batch_size"]
         self.gamma = args["gamma"]
