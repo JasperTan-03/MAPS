@@ -126,7 +126,7 @@ class DuelingGraphDQN(nn.Module):
         self.nav_advantage = nn.Sequential(
             nn.Linear(gnn_output_dim, dqn_hidden_dim),
             nn.ReLU(),
-            nn.Linear(dqn_hidden_dim, max_num_edges)
+            nn.Linear(dqn_hidden_dim, 4) # for up, down, left, right
         )
         
     def forward(self, state: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -160,5 +160,7 @@ class DuelingGraphDQN(nn.Module):
         # Apply action mask
         if 'valid_actions_mask' in state:
             nav_logits[~state['valid_actions_mask']] = float('-inf')
+
+        print(cls_logits.shape, nav_logits.shape)
             
         return cls_logits, nav_logits
