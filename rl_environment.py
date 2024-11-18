@@ -1,101 +1,184 @@
+import gymnasium as gym
 import numpy as np
 import torch
-import dgl
-from gym import spaces
-from gym import Env
+from gymnasium import spaces
+from typing import Tuple, Optional, Dict, Any
+from torch_geometric.data import Data
+from torch_geometric.utils import k_hop_subgraph
 
-class MultiAgentTaskSchedulingEnv(Env):
-    def __init__(self, num_nodes, task_arrival_rate):
-        self.num_nodes = num_nodes
-        self.task_arrival_rate = task_arrival_rate
+class GraphSegmentationEnv(gym.Env):
+    """Custom Environment for graph-based image/point cloud segmentation that follows gym interface."""
 
-        # Observation space for each node: [local_state, global_state (snapshot from messages)]
-        self.observation_space = spaces.Dict({
-            'local_state': spaces.Dict({
-                'resources': spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-                'timestamp': spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32),
-                'queue_length': spaces.Box(low=0, high=100, shape=(1,), dtype=np.int32)
-            }),
-            'global_snapshot': spaces.Box(low=0, high=1, shape=(num_nodes, 3), dtype=np.float32)
+    def __init__(
+        self, 
+        graph_data: Data,
+        num_classes: int,
+        max_edges: int,
+        reward_correct: float = 1.0,
+        reward_incorrect: float = -1.0,
+        reward_step: float = -0.01,
+        render_mode: Optional[str] = None
+    ):
+        super().__init__()
+        
+        # Store graph data
+        self.graph_data = graph_data
+        self.num_nodes = graph_data.x.size(0)
+        self.num_classes = num_classes
+        self.max_edges = max_edges
+        
+        # Reward configuration
+        self.reward_correct = reward_correct
+        self.reward_incorrect = reward_incorrect
+        self.reward_step = reward_step
+        
+        self.render_mode = render_mode
+        
+        # Define action spaces:
+        # - Navigation: Which edge to traverse (max_edges possible edges)
+        # - Classification: Which class to assign to current node (num_classes)
+        self.action_space = spaces.Dict({
+            'navigation': spaces.Discrete(max_edges),
+            'classification': spaces.Discrete(num_classes)
         })
-
-        # Action space: Scheduling a task on the current node or sending messages to other nodes
-        self.action_space = spaces.Discrete(2)  # 0: schedule a task, 1: send a message
-
-        # Initial state for each node
-        self.node_states = {
-            node_id: {
-                'resources': np.random.uniform(0.1, 1),
-                'timestamp': 0.0,
-                'queue_length': 0,
-                'global_snapshot': np.zeros((num_nodes, 3))  # Simulates vector clock and other nodes' states
-            }
-            for node_id in range(num_nodes)
-        }
-
-        # Create graph structure
-        self.graph = dgl.DGLGraph()
-        self.graph.add_nodes(num_nodes)
-        for i in range(num_nodes):
-            for j in range(i + 1, num_nodes):
-                self.graph.add_edge(i, j)
-                self.graph.add_edge(j, i)
-
-    def reset(self):
-        self.node_states = {
-            node_id: {
-                'resources': np.random.uniform(0.1, 1),
-                'timestamp': 0.0,
-                'queue_length': 0,
-                'global_snapshot': np.zeros((self.num_nodes, 3))
-            }
-            for node_id in range(self.num_nodes)
-        }
-        return self._get_observations()
-
-    def _get_observations(self):
-        # Returns the observation for all nodes (each node sees its local state + global snapshot)
+        
+        # Define observation space
+        node_features = self.graph_data.x.size(1)
+        self.observation_space = spaces.Dict({
+            'x': spaces.Box(
+                low=-np.inf, 
+                high=np.inf, 
+                shape=(self.num_nodes, node_features), 
+                dtype=np.float32
+            ),
+            'edge_index': spaces.Box(
+                low=0,
+                high=self.num_nodes,
+                shape=(2, self.graph_data.edge_index.size(1)),
+                dtype=np.int64
+            ),
+            'current_node': spaces.Discrete(self.num_nodes),
+            'valid_actions_mask': spaces.Box(
+                low=0,
+                high=1,
+                shape=(max_edges,),
+                dtype=np.int8
+            ),
+            'segmentation_mask': spaces.Box(
+                low=0,
+                high=num_classes,
+                shape=(self.num_nodes,),
+                dtype=np.int64
+            )
+        })
+        
+        # Initialize state
+        self.current_node = None
+        self.segmentation_mask = None
+        self.steps = 0
+        self.max_steps = self.num_nodes * 2  # Adjust based on needs
+        
+    def _get_valid_actions_mask(self) -> np.ndarray:
+        """Create a mask for valid navigation actions at current state."""
+        # Get neighboring nodes
+        neighbors = self.graph_data.edge_index[1][
+            self.graph_data.edge_index[0] == self.current_node
+        ]
+        
+        # Create mask
+        mask = np.zeros(10, dtype=np.int8) # UPDATE THIS BASED ON HOW MANY EDGES WE CAN NAVIGATE TO
+        mask[:len(neighbors)] = 1
+        
+        return mask
+    
+    def _get_observation(self) -> Dict[str, Any]:
+        """Get current observation state."""
         return {
-            node_id: {
-                'local_state': {
-                    'resources': self.node_states[node_id]['resources'],
-                    'timestamp': self.node_states[node_id]['timestamp'],
-                    'queue_length': self.node_states[node_id]['queue_length'],
-                },
-                'global_snapshot': self.node_states[node_id]['global_snapshot']
-            }
-            for node_id in range(self.num_nodes)
+            'x': self.graph_data.x.numpy(),
+            'edge_index': self.graph_data.edge_index.numpy(),
+            'current_node': self.current_node,
+            'valid_actions_mask': self._get_valid_actions_mask(),
+            'segmentation_mask': self.segmentation_mask
         }
-
-    def step(self, actions):
-        # Perform actions for each node (actions will be a dictionary of node actions)
-        rewards = {}
-        for node_id, action in actions.items():
-            if action == 0:  # Schedule task
-                task_size = np.random.uniform(0.1, 0.5)
-                self.node_states[node_id]['resources'] -= task_size
-                self.node_states[node_id]['queue_length'] += 1
-            elif action == 1:  # Send message to update other nodes
-                for other_node_id in range(self.num_nodes):
-                    if other_node_id != node_id:
-                        self._send_message(node_id, other_node_id)
+    
+    def _get_reward(self, action_cls: int) -> float:
+        """Calculate reward based on classification action."""
+        true_label = self.graph_data.y[self.current_node].item()
         
-        # Simulate some processing and resource updates
-        for node_id in range(self.num_nodes):
-            self.node_states[node_id]['resources'] = np.clip(self.node_states[node_id]['resources'] + np.random.uniform(0.05, 0.1), 0, 1)
-            rewards[node_id] = -np.var([self.node_states[n]['resources'] for n in range(self.num_nodes)])
+        reward = self.reward_step  # Base reward/penalty for each step
         
-        done = False  # Continue indefinitely
-        return self._get_observations(), rewards, done, {}
+        if action_cls == true_label:
+            reward += self.reward_correct
+        else:
+            reward += self.reward_incorrect
+            
+        return reward
+    
+    def reset(
+        self, 
+        seed: Optional[int] = None, 
+        options: Optional[Dict] = None
+    ) -> Tuple[Dict, Dict]:
+        super().reset(seed=seed)
+        
+        # Reset environment state
+        self.steps = 0
+        self.current_node = self.np_random.integers(0, self.num_nodes)
+        self.segmentation_mask = np.zeros(self.num_nodes, dtype=np.int64)
+        
+        observation = self._get_observation()
+        info = {}
+        
+        return observation, info
+    
+    def step(self, action: Dict[str, int]) -> Tuple[Dict, float, bool, bool, Dict]:
+        """
+        Execute one environment step.
+        
+        Args:
+            action: Dictionary containing:
+                - navigation: Index of edge to traverse
+                - classification: Class to assign to current node
+        """
+        self.steps += 1
+        
+        # Get valid neighbors
+        neighbors = self.graph_data.edge_index[1][
+            self.graph_data.edge_index[0] == self.current_node
+        ]
+        
+        # Execute navigation action if valid
+        if action['navigation'] < len(neighbors):
+            self.current_node = neighbors[action['navigation']].item()
+            
+        # Execute classification action
+        self.segmentation_mask[self.current_node] = action['classification']
+        
+        # Calculate reward
+        reward = self._get_reward(action['classification'])
+        
+        # Get new observation
+        observation = self._get_observation()
+        
+        # Check termination conditions
+        terminated = False
+        if self.steps >= self.max_steps:
+            terminated = True
+            
+        # Check truncation conditions
+        truncated = False
+        
+        # Additional info
+        info = {
+            'steps': self.steps,
+            'segmentation_accuracy': np.mean(
+                self.segmentation_mask == self.graph_data.y.numpy().flatten()
+            )
+        }
+        
+        return observation, reward, terminated, truncated, info
 
-    def _send_message(self, sender, receiver):
-        # Update global snapshot for the receiver based on the sender's current state
-        self.node_states[receiver]['global_snapshot'][sender] = np.array([
-            self.node_states[sender]['resources'],
-            self.node_states[sender]['timestamp'],
-            self.node_states[sender]['queue_length']
-        ])
-
-    def render(self):
-        for node_id in range(self.num_nodes):
-            print(f"Node {node_id} State: {self.node_states[node_id]}")
+    def seed(self, seed: Optional[int] = None):
+        """Set random seed."""
+        super().reset(seed=seed)
+        return [seed]
