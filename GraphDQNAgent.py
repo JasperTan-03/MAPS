@@ -1,3 +1,4 @@
+import math
 import os
 import random
 from typing import Dict, List, Optional, Tuple
@@ -9,12 +10,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-from neural_net import DuelingGraphDQN, ReplayBuffer
+from neural_net import DuelingGraphDQN, Experience, ReplayBuffer
 from rl_environment import SegmentationEnv
 
 # Hyperparameters
-TAU = 1e-3
-LR = 5e-4
 UPDATE_EVERY = 4
 
 
@@ -35,6 +34,7 @@ class GraphDQNAgent:
         epsilon_decay: float = 0.995,
         buffer_size: int = 100000,
         batch_size: int = 32,
+        tau: float = 1e-3,
         target_update_freq: int = 1000,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
     ):
@@ -71,10 +71,12 @@ class GraphDQNAgent:
         self.epsilon = epsilon_start
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
+        self.tau = tau
         self.target_update_freq = target_update_freq
 
         # Initialize time step (for updating every UPDATE_EVERY steps)
         self.t_step = 0
+        self.losses = []
 
     def select_action(self, state: Dict[str, torch.Tensor]) -> Tuple[int, int]:
         """Select an action using epsilon-greedy policy.
@@ -91,8 +93,13 @@ class GraphDQNAgent:
             for k, v in state.items()
         }
 
+        self.epsilon = self.epsilon_end + (self.epsilon - self.epsilon_end) * math.exp(
+            -1.0 * self.t_step / self.epsilon_decay
+        )
+        self.t_step += 1
+
         # Epsilon-greedy action selection
-        if random.randm() > self.epsilon:
+        if random.random() > self.epsilon:
             with torch.no_grad():
                 cls_q_values, nav_q_values = self.policy_net(state)
                 cls_action = cls_q_values.argmax(dim=1).item()
@@ -117,40 +124,38 @@ class GraphDQNAgent:
 
         # Sample a batch of experiences
         experiences = self.memory.sample(self.batch_size)
-        # batch = Transition(*zip(*transitions))
+        batch = Experience(*zip(*experiences))
 
         # Separate experiences into batches
         non_final_mask = torch.tensor(
-            tuple(map(lambda s: s is not None, experiences.next_state)),
+            tuple(map(lambda s: s is not None, batch.next_state)),
             device=self.device,
             dtype=torch.bool,
         )
+        non_final_next_states = torch.cat(
+            [s for s in batch.next_state if s is not None]
+        )
 
-        state_batch = experiences.state
-        action_nav_batch = torch.tensor(
-            [a for a in experiences.action_nav], device=self.device
-        )
-        action_cls_batch = torch.tensor(
-            [a for a in experiences.action_cls], device=self.device
-        )
-        reward_batch = torch.tensor([r for r in experiences.reward], device=self.device)
+        state_batch = torch.cat(batch.state)
+        action_nav_batch = torch.cat(batch.action_nav)
+        action_cls_batch = torch.cat(batch.action_cls)
+        reward_batch = torch.cat(batch.reward)
 
         # Current Q values
-        cls_q_values, nav_q_values = self.policy_net(state_batch[0])
-        current_cls_q = cls_q_values.gather(1, action_cls_batch.unsqueeze(1))
-        current_nav_q = nav_q_values.gather(1, action_nav_batch.unsqueeze(1))
+        policy_cls_q, policy_nav_q = self.policy_net(state_batch)
+        policy_cls_q = policy_cls_q.gather(1, action_cls_batch)
+        policy_nav_q = policy_nav_q.gather(1, action_nav_batch)
 
         # Compute target Q values
         next_cls_q = torch.zeros(self.batch_size, device=self.device)
         next_nav_q = torch.zeros(self.batch_size, device=self.device)
 
-        if any(non_final_mask):
-            with torch.no_grad():
-                next_cls_q_values, next_nav_q_values = self.target_net(
-                    experiences.next_state[0]
-                )
-                next_cls_q[non_final_mask] = next_cls_q_values.max(1)[0]
-                next_nav_q[non_final_mask] = next_nav_q_values.max(1)[0]
+        with torch.no_grad():
+            next_cls_q_values, next_nav_q_values = self.target_net(
+                non_final_next_states
+            )
+            next_cls_q[non_final_mask] = next_cls_q_values.max(1).values
+            next_nav_q[non_final_mask] = next_nav_q_values.max(1).values
 
         # Compute target Q values
         expected_cls_q = (next_cls_q * self.gamma) + reward_batch
@@ -158,8 +163,8 @@ class GraphDQNAgent:
 
         # Compute loss
         criterion = nn.SmoothL1Loss()
-        cls_loss = criterion(current_cls_q, expected_cls_q.unsqueeze(1))
-        nav_loss = criterion(current_nav_q, expected_nav_q.unsqueeze(1))
+        cls_loss = criterion(policy_cls_q, expected_cls_q.unsqueeze(1))
+        nav_loss = criterion(policy_nav_q, expected_nav_q.unsqueeze(1))
         total_loss = cls_loss + nav_loss
 
         # Optimize the model
@@ -169,14 +174,6 @@ class GraphDQNAgent:
         # Gradient clipping
         torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
         self.optimizer.step()
-
-        # Update target network
-        self.training_step += 1
-        if self.training_step % UPDATE_EVERY == 0:
-            self.target_net.load_state_dict(self.policy_net.state_dict())
-
-        # Update epislon
-        self.epsilon = max(self.epsilon_end, self.epsilon_decay * self.epsilon)
 
         return total_loss.item()
 
@@ -204,16 +201,24 @@ class GraphDQNAgent:
                 self.memory.push(
                     state, nav_action, cls_action, next_state, reward, done
                 )
+                state = next_state
 
                 # Optimize model
                 loss = self.optimize_model()
                 if loss is not None:
                     self.losses.append(loss)
 
+                # Soft update of the target network's weight
+                target_net_state_dict = self.target_net.state_dict()
+                policy_net_state_dict = self.policy_net.state_dict()
+                for key in policy_net_state_dict:
+                    target_net_state_dict[key] = policy_net_state_dict[
+                        key
+                    ] * self.tau + target_net_state_dict[key] * (1 - self.tau)
+                self.target_net.load_state_dict(target_net_state_dict)
+
                 if done:
                     break
-
-                state = next_state
 
             episode_rewards.append(episode_reward)
 
@@ -274,21 +279,20 @@ class GraphDQNAgent:
 
 
 if __name__ == "__main__":
+    # Get graph
+    graph = torch.load("data/image_graph.pt")
+
     # Create sample data
-    node_feature_dim = 64
+    node_feature_dim = graph.x.size(-1)
     gnn_hidden_dim = 64
     gnn_output_dim = 64
     dqn_hidden_dim = 64
     num_classes = 2
-    max_num_edges = 10
+    max_num_edges = graph.edge_index.size(1)
     seed = 0
 
     # Create environment
-    env = SegmentationEnv(
-        image=np.random.randint(0, 2, (100, 100)),
-        labels=np.random.randint(0, 2, (100, 100)),
-        step_limit=10,
-    )
+    env = SegmentationEnv(graph, seed=seed)
 
     # Create agent
     agent = GraphDQNAgent(
