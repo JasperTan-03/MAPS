@@ -4,6 +4,7 @@ import random
 from typing import Dict, List, Optional, Tuple
 
 import matplotlib as plt
+from tqdm import tqdm
 import numpy as np
 import torch
 import torch.nn as nn
@@ -24,7 +25,6 @@ class GraphDQNAgent:
         gnn_output_dim: int,
         dqn_hidden_dim: int,
         num_classes: int,
-        max_num_edges: int,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
     ):
         args = yaml.safe_load(open("configs/agent.yaml", "r"))
@@ -37,7 +37,7 @@ class GraphDQNAgent:
             config=args,
         )
 
-        self.seed = random.seed(args["random_seed"])
+        self.seed = random.seed(int(args["random_seed"]))
         self.device = device
 
         # Q-Networks
@@ -47,7 +47,6 @@ class GraphDQNAgent:
             gnn_output_dim=gnn_output_dim,
             dqn_hidden_dim=dqn_hidden_dim,
             num_classes=num_classes,
-            max_num_edges=max_num_edges,
         ).to(self.device)
 
         self.target_net = DuelingGraphDQN(
@@ -56,24 +55,23 @@ class GraphDQNAgent:
             gnn_output_dim=gnn_output_dim,
             dqn_hidden_dim=dqn_hidden_dim,
             num_classes=num_classes,
-            max_num_edges=max_num_edges,
         ).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
 
         self.optimizer = optim.Adam(
-            self.policy_net.parameters(), lr=args["lr"], amsgrad=True
+            self.policy_net.parameters(), lr=float(args["lr"]), amsgrad=True
         )
 
         # Replay memory
-        self.memory = ReplayBuffer(args["replay_buffer_size"])
+        self.memory = ReplayBuffer(int(args["replay_buffer_size"]))
 
-        self.batch_size = args["batch_size"]
-        self.gamma = args["gamma"]
-        self.epsilon = args["epsilon_start"]
-        self.epsilon_end = args["epsilon_end"]
-        self.epsilon_decay = args["epsilon_decay"]
-        self.tau = args["tau"]
-        self.target_update_freq = args["target_update_freq"]
+        self.batch_size = int(args["batch_size"])
+        self.gamma = float(args["gamma"])
+        self.epsilon = float(args["epsilon_start"])
+        self.epsilon_end = float(args["epsilon_end"])
+        self.epsilon_decay = float(args["epsilon_decay"])
+        self.tau = float(args["tau"])
+        self.target_update_freq = int(args["target_update_freq"])
 
         # Initialize time step (for updating every UPDATE_EVERY steps)
         self.t_step = 0
@@ -104,8 +102,8 @@ class GraphDQNAgent:
         # Epsilon-greedy action selection
         if random.random() > self.epsilon:
             with torch.no_grad():
-                cls_action = expected_cls_q.argmax(dim=1).item()
-                nav_action = expected_nav_q.argmax(dim=1).item()
+                cls_action = expected_cls_q.argmax().item()
+                nav_action = expected_nav_q.argmax().item()
         else:
             # Random classification action
             cls_action = random.randrange(self.policy_net.cls_advantage[2].out_features)
@@ -163,7 +161,8 @@ class GraphDQNAgent:
         expected_nav_q = (next_nav_q * self.gamma) + reward_batch
 
         # Compute loss
-        criterion = nn.SmoothL1Loss()
+        # criterion = nn.SmoothL1Loss()
+        criterion = nn.MSELoss()
         cls_loss = criterion(policy_cls_q, expected_cls_q.unsqueeze(1))
         nav_loss = criterion(policy_nav_q, expected_nav_q.unsqueeze(1))
         total_loss = cls_loss + nav_loss
@@ -183,12 +182,17 @@ class GraphDQNAgent:
         env,
         num_episodes: int,
         max_steps: int = 1000,
+        train_dir: str = "data/aachen_graphs"
     ) -> List[float]:
         episode_rewards_cls = []
         episode_rewards_nav = []
 
-        for episode in range(num_episodes):
-            state = env.reset()
+        files = os.listdir(train_dir)
+
+        for i, episode in enumerate(range(num_episodes)):
+            # Load graph
+            graph = torch.load(f"{train_dir}/{files[i]}")
+            state = env.reset(new_graph=graph)
             episode_reward_cls = 0
             episode_reward_nav = 0
 
@@ -201,11 +205,14 @@ class GraphDQNAgent:
                     valid_actions_mask=state["valid_actions_mask"],
                 )
 
-                next_step, rewards, done, _ = env.step(cls_action, nav_action)
+                next_step, rewards, done = env.step({
+                    "cls": cls_action,
+                    "nav": nav_action
+                })
 
                 # Unpack rewards
-                cls_rewards = rewards["cls"]
-                nav_rewards = rewards["nav"]
+                cls_rewards = rewards["cls"].to(self.device)
+                nav_rewards = rewards["nav"].to(self.device)
 
                 # Add rewards
                 episode_reward_cls += cls_rewards[cls_action]
@@ -213,6 +220,10 @@ class GraphDQNAgent:
 
                 # Compute Loss
                 criterion = nn.SmoothL1Loss()
+                # before calculted loss set the masked expected q values from nav from -inf to some finite
+                # negative value
+                expected_nav_q[~state["valid_actions_mask"]] = -1
+
                 cls_loss = criterion(expected_cls_q, cls_rewards)
                 nav_loss = criterion(expected_nav_q, nav_rewards)
                 total_loss = cls_loss + nav_loss
@@ -237,7 +248,7 @@ class GraphDQNAgent:
                 total_loss.backward()
 
                 # Gradient clipping
-                torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
+                # torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
                 self.optimizer.step()
                 state = next_step
                 self.t_step += 1
@@ -247,7 +258,7 @@ class GraphDQNAgent:
 
                 # actions = {"cls": cls_action, "nav": nav_action}
                 # # Take action
-                # next_state, rewards, done, _ = env.step(actions)
+                # next_state, rewards, done = env.step(actions)
 
                 # # Unpack rewards
                 # cls_rewards = rewards["cls"]
@@ -300,17 +311,17 @@ class GraphDQNAgent:
             )
 
             # Print progress
-            if (episode + 1) % 10 == 0:
-                avg_reward = np.mean(episode_rewards[-10:])
-                avg_loss = np.mean(self.losses[-100:]) if self.losses else 0
-                print(
-                    f"Episode {episode + 1}/{num_episodes} | "
-                    f"Avg Reward: {avg_reward:.2f} | "
-                    f"Avg Loss: {avg_loss:.4f} | "
-                    f"Epsilon: {self.epsilon:.2f} | "
-                    f"Cls Reward: {episode_reward_cls:.2f} | "
-                    f"Nav Reward: {episode_reward_nav:.2f}"
-                )
+            # if (episode + 1) % 10 == 0:
+            #     avg_reward = np.mean(episode_rewards[-10:])
+            #     avg_loss = np.mean(self.losses[-100:]) if self.losses else 0
+            #     print(
+            #         f"Episode {episode + 1}/{num_episodes} | "
+            #         f"Avg Reward: {avg_reward:.2f} | "
+            #         f"Avg Loss: {avg_loss:.4f} | "
+            #         f"Epsilon: {self.epsilon:.2f} | "
+            #         f"Cls Reward: {episode_reward_cls:.2f} | "
+            #         f"Nav Reward: {episode_reward_nav:.2f}"
+            #     )
         wandb.finish()
         return episode_rewards_cls, episode_rewards_nav
 
@@ -367,11 +378,10 @@ if __name__ == "__main__":
     gnn_output_dim = 64
     dqn_hidden_dim = 64
     num_classes = 2
-    max_num_edges = graph.edge_index.size(1)
     seed = 0
 
     # Create environment
-    env = SegmentationEnv(graph, seed=seed)
+    env = GraphSegmentationEnv(graph, seed=seed)
 
     # Create agent
     agent = GraphDQNAgent(
@@ -380,7 +390,6 @@ if __name__ == "__main__":
         gnn_output_dim=gnn_output_dim,
         dqn_hidden_dim=dqn_hidden_dim,
         num_classes=num_classes,
-        max_num_edges=max_num_edges,
         seed=seed,
     )
 

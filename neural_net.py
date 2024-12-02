@@ -118,7 +118,6 @@ class DuelingGraphDQN(nn.Module):
         gnn_output_dim: int,
         dqn_hidden_dim: int,
         num_classes: int,
-        max_num_edges: int,
     ):
         super(DuelingGraphDQN, self).__init__()
 
