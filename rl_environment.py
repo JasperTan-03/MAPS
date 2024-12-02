@@ -163,7 +163,7 @@ class GraphSegmentationEnv(gym.Env):
                 if neighbor in self.visited_nodes:
                     navigation_reward[0] = -1
                 else:
-                    navigation_reward[0] = 1
+                    navigation_reward[0] = 0
 
                 self.current_node = neighbor.item()
 
@@ -171,7 +171,7 @@ class GraphSegmentationEnv(gym.Env):
                 if neighbor in self.visited_nodes:
                     navigation_reward[1] = -1
                 else:
-                    navigation_reward[1] = 1
+                    navigation_reward[1] = 0
 
                 self.current_node = neighbor.item()
 
@@ -179,7 +179,7 @@ class GraphSegmentationEnv(gym.Env):
                 if neighbor in self.visited_nodes:
                     navigation_reward[2] = -1
                 else:
-                    navigation_reward[2] = 1
+                    navigation_reward[2] = 0
 
                 self.current_node = neighbor.item()
 
@@ -187,7 +187,7 @@ class GraphSegmentationEnv(gym.Env):
                 if neighbor in self.visited_nodes:
                     navigation_reward[3] = -1
                 else:
-                    navigation_reward[3] = 1
+                    navigation_reward[3] = 0
 
                 self.current_node = neighbor.item()
 

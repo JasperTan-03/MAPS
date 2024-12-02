@@ -161,7 +161,8 @@ class GraphDQNAgent:
         expected_nav_q = (next_nav_q * self.gamma) + reward_batch
 
         # Compute loss
-        criterion = nn.SmoothL1Loss()
+        # criterion = nn.SmoothL1Loss()
+        criterion = nn.MSELoss()
         cls_loss = criterion(policy_cls_q, expected_cls_q.unsqueeze(1))
         nav_loss = criterion(policy_nav_q, expected_nav_q.unsqueeze(1))
         total_loss = cls_loss + nav_loss
