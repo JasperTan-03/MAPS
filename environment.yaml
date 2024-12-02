@@ -36,14 +36,9 @@ dependencies:
   - ipykernel
   - pytables
   - h5py
-  - gymasium
+  - gymnasium
   
   - pip
   - pip:
     # Dependencies that are better installed via pip
-    - flash-attn
     - torch-geometric
-    - torch-scatter
-    - torch-sparse
-    - torch-cluster
-    - torch-spline-conv

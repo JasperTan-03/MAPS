@@ -10,10 +10,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import wandb
 import yaml
+from PIL import Image
+from tqdm import tqdm
 
+import wandb
 from neural_net import DuelingGraphDQN, ReplayBuffer
+from render import SegmentationRenderer
 from rl_environment import GraphSegmentationEnv
 
 
@@ -72,6 +75,7 @@ class GraphDQNAgent:
         self.epsilon_decay = float(args["epsilon_decay"])
         self.tau = float(args["tau"])
         self.target_update_freq = int(args["target_update_freq"])
+        self.num_classes = num_classes
 
         # Initialize time step (for updating every UPDATE_EVERY steps)
         self.t_step = 0
@@ -182,7 +186,8 @@ class GraphDQNAgent:
         env,
         num_episodes: int,
         max_steps: int = 1000,
-        train_dir: str = "data/aachen_graphs"
+        train_dir: str = "data/aachen_graphs",
+        render: bool = False,
     ) -> List[float]:
         episode_rewards_cls = []
         episode_rewards_nav = []
@@ -195,6 +200,23 @@ class GraphDQNAgent:
             state = env.reset(new_graph=graph)
             episode_reward_cls = 0
             episode_reward_nav = 0
+            if render:
+                # folder = "./data/aachen_graphs"
+                # raw_image_path = f"{folder}/aachen_000000_000019_leftImg8bit.png"
+                # label_image_path = f"{folder}/aachen_000000_000019_gtFine_labelIds.png"
+                raw_image_path = "downsampled_label_image.png"
+                label_image_path = "downsampled_label_image.png"
+                raw_image = Image.open(raw_image_path)
+                label_image = Image.open(label_image_path)
+                raw_image_array = np.array(raw_image)
+                label_image_array = np.array(label_image)
+                image_size = raw_image_array.shape[:2]
+                renderer = SegmentationRenderer(
+                    original_image=raw_image_array,
+                    ground_truth=label_image_array,
+                    num_classes=self.num_classes,
+                    image_size=image_size,
+                )
 
             for step in range(max_steps):
                 # Select action
@@ -205,10 +227,15 @@ class GraphDQNAgent:
                     valid_actions_mask=state["valid_actions_mask"],
                 )
 
-                next_step, rewards, done = env.step({
-                    "cls": cls_action,
-                    "nav": nav_action
-                })
+                next_step, rewards, done = env.step(
+                    {"cls": cls_action, "nav": nav_action}
+                )
+
+                if render:
+                    y, x = graph.x[state["current_node"], :2].cpu().numpy().astype(int)
+                    renderer.update_position((x, y))
+                    renderer.update_segmentation((x, y), cls_action)
+                    renderer.render((x, y))
 
                 # Unpack rewards
                 cls_rewards = rewards["cls"].to(self.device)
@@ -309,6 +336,8 @@ class GraphDQNAgent:
                     "episode_total_reward": episode_reward_cls + episode_reward_nav,
                 }
             )
+            if render:
+                renderer.close()
 
             # Print progress
             # if (episode + 1) % 10 == 0:
