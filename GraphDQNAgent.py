@@ -187,6 +187,7 @@ class GraphDQNAgent:
         num_episodes: int,
         max_steps: int = 1000,
         train_dir: str = "data/aachen_graphs",
+        image_dir: str = "data/aachen",
         render: bool = False,
     ) -> List[float]:
         episode_rewards_cls = []
@@ -201,11 +202,10 @@ class GraphDQNAgent:
             episode_reward_cls = 0
             episode_reward_nav = 0
             if render:
-                # folder = "./data/aachen_graphs"
-                # raw_image_path = f"{folder}/aachen_000000_000019_leftImg8bit.png"
-                # label_image_path = f"{folder}/aachen_000000_000019_gtFine_labelIds.png"
-                raw_image_path = "downsampled_label_image.png"
-                label_image_path = "downsampled_label_image.png"
+                image_files = os.listdir(f"{image_dir}/images")
+                label_files = os.listdir(f"{image_dir}/labels")
+                raw_image_path = f"{image_dir}/images/{image_files[i]}"
+                label_image_path = f"{image_dir}/labels/{label_files[i]}"
                 raw_image = Image.open(raw_image_path)
                 label_image = Image.open(label_image_path)
                 raw_image_array = np.array(raw_image)
