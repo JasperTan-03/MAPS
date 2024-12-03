@@ -42,7 +42,8 @@ class SegmentationRenderer:
             position: (x, y) coordinates of current position
         """
         x, y = position
-        self.visit_map[x, y] += 1
+        if self.visit_map[x, y] == 0:
+            self.visit_map[x, y] = 1
 
     def update_segmentation(self, position: Tuple[int, int], class_label: int):
         """
@@ -104,7 +105,13 @@ class SegmentationRenderer:
         self.ax[1, 0].set_title("Agent Segmentation")
 
         # Plot 4: Visit Heatmap
-        visit_plot = self.ax[1, 1].imshow(self.visit_map, cmap="hot", norm=None)
+        visit_map_binary = (self.visit_map > 0).astype(np.uint8)
+        visit_plot = self.ax[1, 1].imshow(
+            visit_map_binary, 
+            cmap='binary', 
+            vmin=0, 
+            vmax=1
+        )
         self.ax[1, 1].plot(
             current_position[1], current_position[0], "go", markersize=10
         )
