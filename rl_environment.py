@@ -68,8 +68,8 @@ class GraphSegmentationEnv(gym.Env):
         """Initialize BFS traversal."""
         self.bfs_queue.clear()
         self.visited.clear()
-        self.bfs_queue.append(0)
-        self.visited.add(0)
+        self.bfs_queue.append(self.num_nodes // 2)
+        self.visited.add(self.num_nodes // 2)
         self.current_node = torch.tensor(self.num_nodes // 2)
 
     def reset(
@@ -95,29 +95,29 @@ class GraphSegmentationEnv(gym.Env):
         
     def _get_valid_actions_mask(self) -> np.ndarray:
         """Create a mask for valid navigation actions at current state."""
-        # Get neighboring nodes
-        cur_loc = self.graph.x[self.current_node][:2]
-        cur_x, cur_y = cur_loc[0].item(), cur_loc[1].item()
-        max_loc = self.graph.x[-1][:2]
-        max_x, max_y = max_loc[0].item(), max_loc[1].item()
+        # # Get neighboring nodes
+        # cur_loc = self.graph.x[self.current_node][:2]
+        # cur_x, cur_y = cur_loc[0].item(), cur_loc[1].item()
+        # max_loc = self.graph.x[-1][:2]
+        # max_x, max_y = max_loc[0].item(), max_loc[1].item()
 
         mask = torch.zeros(4, dtype=torch.bool)
 
-        # Check if we can move left
-        if cur_y > 0:
-            mask[0] = 1
+        # # Check if we can move left
+        # if cur_y > 0:
+        #     mask[0] = 1
 
-        # Check if we can move right
-        if cur_y < max_y:
-            mask[1] = 1
+        # # Check if we can move right
+        # if cur_y < max_y:
+        #     mask[1] = 1
 
-        # Check if we can move up
-        if cur_x > 0:
-            mask[2] = 1
+        # # Check if we can move up
+        # if cur_x > 0:
+        #     mask[2] = 1
 
-        # Check if we can move down
-        if cur_x < max_x:
-            mask[3] = 1
+        # # Check if we can move down
+        # if cur_x < max_x:
+        #     mask[3] = 1
         
         return mask
     
@@ -167,6 +167,8 @@ class GraphSegmentationEnv(gym.Env):
 
         if not done:
             neighbors = self.graph.edge_index[1][self.graph.edge_index[0] == self.current_node]
+            if self.current_node.item() == 0:
+                print("here")
             for neighbor in neighbors:
                 if neighbor.item() not in self.visited:
                     self.bfs_queue.append(neighbor.item())
