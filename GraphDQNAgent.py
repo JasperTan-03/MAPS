@@ -23,11 +23,12 @@ from rl_environment import GraphSegmentationEnv
 class GraphDQNAgent:
     def __init__(
         self,
-        node_feature_dim: int,
-        gnn_hidden_dim: int,
-        gnn_output_dim: int,
-        dqn_hidden_dim: int,
         num_classes: int,
+        node_feature_dim: int,
+        gnn_hidden_dim: int = 64,
+        gnn_output_dim: int = 64,
+        dqn_hidden_dim: int = 64,
+        k_hops: int = 4,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
     ):
         args = yaml.safe_load(open("configs/agent.yaml", "r"))
@@ -50,6 +51,7 @@ class GraphDQNAgent:
             gnn_output_dim=gnn_output_dim,
             dqn_hidden_dim=dqn_hidden_dim,
             num_classes=num_classes,
+            k_hops=k_hops,
         ).to(self.device)
 
         self.target_net = DuelingGraphDQN(
@@ -58,6 +60,7 @@ class GraphDQNAgent:
             gnn_output_dim=gnn_output_dim,
             dqn_hidden_dim=dqn_hidden_dim,
             num_classes=num_classes,
+            k_hops=k_hops,
         ).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
 
@@ -107,15 +110,18 @@ class GraphDQNAgent:
         if random.random() > self.epsilon:
             with torch.no_grad():
                 cls_action = expected_cls_q.argmax().item()
-                nav_action = expected_nav_q.argmax().item()
+                # nav_action = expected_nav_q.argmax().item()
         else:
             # Random classification action
             cls_action = random.randrange(self.policy_net.cls_advantage[2].out_features)
             # Random navigation action from valid actions
-            valid_actions = torch.where(valid_actions_mask)[0]
-            nav_action = valid_actions[random.randrange(len(valid_actions))].item()
+            # valid_actions = torch.where(valid_actions_mask)[0]
+            # nav_action = valid_actions[random.randrange(len(valid_actions))].item()
 
-        return cls_action, nav_action
+        # with torch.no_grad():
+        #     cls_action = expected_cls_q.argmax().item()
+
+        return cls_action   # , nav_action
 
     def optimize_model(self) -> Optional[torch.Tensor]:
         """Perform a single step of optimization on the policy network.
@@ -176,7 +182,7 @@ class GraphDQNAgent:
         total_loss.backward()
 
         # Gradient clipping
-        torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
+        torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), max_norm=0.5)
         self.optimizer.step()
 
         return total_loss.item()
@@ -191,7 +197,7 @@ class GraphDQNAgent:
         render: bool = False,
     ) -> List[float]:
         episode_rewards_cls = []
-        episode_rewards_nav = []
+        # episode_rewards_nav = []
 
         files = os.listdir(train_dir)
 
@@ -200,12 +206,12 @@ class GraphDQNAgent:
             graph = torch.load(f"{train_dir}/{files[i]}")
             state = env.reset(new_graph=graph)
             episode_reward_cls = 0
-            episode_reward_nav = 0
+            # episode_reward_nav = 0
             if render:
-                image_files = os.listdir(f"{image_dir}/images")
-                label_files = os.listdir(f"{image_dir}/labels")
-                raw_image_path = f"{image_dir}/images/{image_files[i]}"
-                label_image_path = f"{image_dir}/labels/{label_files[i]}"
+                # image_files = os.listdir(f"{image_dir}/images")
+                # label_files = os.listdir(f"{image_dir}/labels")
+                raw_image_path = "data/aachen_raw/aachen_000000_000019_leftImg8bit.png" #f"{image_dir}/images/{image_files[i]}"
+                label_image_path = "data/aachen_labeled/aachen_000000_000019_gtFine_labelIds.png" #f"{image_dir}/labels/{label_files[i]}"
                 raw_image = Image.open(raw_image_path)
                 label_image = Image.open(label_image_path)
                 raw_image_array = np.array(raw_image)
@@ -220,15 +226,21 @@ class GraphDQNAgent:
 
             for step in range(max_steps):
                 # Select action
-                expected_cls_q, expected_nav_q = self.policy_net(state)
-                cls_action, nav_action = self.select_action(
+                # expected_cls_q, expected_nav_q = self.policy_net(state)
+                expected_cls_q = self.policy_net(state) # only classification for now 
+
+                cls_action = self.select_action(
                     expected_cls_q=expected_cls_q,
-                    expected_nav_q=expected_nav_q,
+                    expected_nav_q=0,   # random value for now since we are not using nav
                     valid_actions_mask=state["valid_actions_mask"],
                 )
 
+                # if selected action is the correct label print it
+                if cls_action == graph.y[state["current_node"]]:
+                    print(f"Correct label selected: {cls_action}")
+
                 next_step, rewards, done = env.step(
-                    {"cls": cls_action, "nav": nav_action}
+                    {"cls": cls_action, "nav": 0} # random value for now since we are not using nav
                 )
 
                 if render:
@@ -239,120 +251,70 @@ class GraphDQNAgent:
 
                 # Unpack rewards
                 cls_rewards = rewards["cls"].to(self.device)
-                nav_rewards = rewards["nav"].to(self.device)
+                # nav_rewards = rewards["nav"].to(self.device)
+                print(cls_rewards)
 
                 # Add rewards
                 episode_reward_cls += cls_rewards[cls_action]
-                episode_reward_nav += nav_rewards[nav_action]
+                # episode_reward_nav += nav_rewards[nav_action]
 
                 # Compute Loss
                 criterion = nn.SmoothL1Loss()
                 # before calculted loss set the masked expected q values from nav from -inf to some finite
                 # negative value
-                expected_nav_q[~state["valid_actions_mask"]] = -1
+                # expected_nav_q[~state["valid_actions_mask"]] = -1
 
                 cls_loss = criterion(expected_cls_q, cls_rewards)
-                nav_loss = criterion(expected_nav_q, nav_rewards)
-                total_loss = cls_loss + nav_loss
+                # nav_loss = criterion(expected_nav_q, nav_rewards)
+                # total_loss = cls_loss + nav_loss
 
                 # Log metrics to wandb
                 wandb.log(
                     {
                         "step": self.t_step,
                         "classification_reward": cls_rewards[cls_action],
-                        "navigation_reward": nav_rewards[nav_action],
-                        "total_reward": cls_rewards[cls_action]
-                        + nav_rewards[nav_action],
+                        # "navigation_reward": nav_rewards[nav_action],
+                        # "total_reward": cls_rewards[cls_action]
+                        # + nav_rewards[nav_action],
                         "classification_loss": cls_loss.item(),
-                        "navigation_loss": nav_loss.item(),
-                        "total_loss": total_loss.item(),
+                        # "navigation_loss": nav_loss.item(),
+                        # "total_loss": total_loss.item(),
                         "epsilon": self.epsilon,
                     }
                 )
 
                 # Optimize the model
                 self.optimizer.zero_grad()
-                total_loss.backward()
+                cls_loss.backward()
 
                 # Gradient clipping
-                # torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
+                torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=1)
+
                 self.optimizer.step()
                 state = next_step
                 self.t_step += 1
 
                 if done:
+                    print(f"Episode {episode} finished after {step} steps")
                     break
 
-                # actions = {"cls": cls_action, "nav": nav_action}
-                # # Take action
-                # next_state, rewards, done = env.step(actions)
-
-                # # Unpack rewards
-                # cls_rewards = rewards["cls"]
-                # nav_rewards = rewards["nav"]
-
-                # # Add rewards
-                # episode_reward_cls += cls_rewards[cls_action]
-                # episode_reward_nav += nav_rewards[nav_action]
-
-                # # Store experience
-                # self.memory.push(
-                #     state,
-                #     nav_action,
-                #     cls_action,
-                #     next_state,
-                #     nav_rewards,
-                #     cls_rewards,
-                #     done,
-                # )
-                # state = next_state
-
-                # # Optimize model
-                # loss = self.optimize_model()
-                # if loss is not None:
-                #     self.losses.append(loss)
-
-                # # Soft update of the target network's weight
-                # target_net_state_dict = self.target_net.state_dict()
-                # policy_net_state_dict = self.policy_net.state_dict()
-                # for key in policy_net_state_dict:
-                #     target_net_state_dict[key] = policy_net_state_dict[
-                #         key
-                #     ] * self.tau + target_net_state_dict[key] * (1 - self.tau)
-                # self.target_net.load_state_dict(target_net_state_dict)
-
-                # if done:
-                #     break
-
             episode_rewards_cls.append(episode_reward_cls)
-            episode_rewards_nav.append(episode_reward_nav)
+            # episode_rewards_nav.append(episode_reward_nav)
 
             # Log episode metrics
             wandb.log(
                 {
                     "episode": episode,
                     "episode_classification_reward": episode_reward_cls,
-                    "episode_navigation_reward": episode_reward_nav,
-                    "episode_total_reward": episode_reward_cls + episode_reward_nav,
+                    # "episode_navigation_reward": episode_reward_nav,
+                    # "episode_total_reward": episode_reward_cls + episode_reward_nav,
                 }
             )
             if render:
                 renderer.close()
 
-            # Print progress
-            # if (episode + 1) % 10 == 0:
-            #     avg_reward = np.mean(episode_rewards[-10:])
-            #     avg_loss = np.mean(self.losses[-100:]) if self.losses else 0
-            #     print(
-            #         f"Episode {episode + 1}/{num_episodes} | "
-            #         f"Avg Reward: {avg_reward:.2f} | "
-            #         f"Avg Loss: {avg_loss:.4f} | "
-            #         f"Epsilon: {self.epsilon:.2f} | "
-            #         f"Cls Reward: {episode_reward_cls:.2f} | "
-            #         f"Nav Reward: {episode_reward_nav:.2f}"
-            #     )
         wandb.finish()
-        return episode_rewards_cls, episode_rewards_nav
+        return episode_rewards_cls
 
     def plot_training_results(self, episode_rewards: List[float]):
         """

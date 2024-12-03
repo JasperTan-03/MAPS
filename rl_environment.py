@@ -5,6 +5,7 @@ from gymnasium import spaces
 from typing import Tuple, Optional, Dict, Any
 from torch_geometric.data import Data
 from torch_geometric.utils import k_hop_subgraph
+from collections import deque
 
 class GraphSegmentationEnv(gym.Env):
     """Custom Environment for graph-based image/point cloud segmentation that follows gym interface."""
@@ -21,8 +22,6 @@ class GraphSegmentationEnv(gym.Env):
         self.num_nodes = graph_data.x.size(0)
         self.num_classes = num_classes
 
-        self.visited_nodes = set()
-        
         # Define action spaces:
         # - Navigation: Which edge to traverse (max_edges possible edges)
         # - Classification: Which class to assign to current node (num_classes)
@@ -53,19 +52,24 @@ class GraphSegmentationEnv(gym.Env):
                 shape=(4,),
                 dtype=np.int8
             ),
-            # 'segmentation_mask': spaces.Box(
-            #     low=0,
-            #     high=num_classes,
-            #     shape=(self.num_nodes,),
-            #     dtype=np.int64
-            # )
         })
         
         # Initialize state
         self.current_node = None
-        # self.segmentation_mask = None
         self.steps = 0
         self.max_steps = self.num_nodes * 2  # Adjust based on needs
+
+        self.bfs_queue = deque()
+        self.visited = set()
+        self._initialize_bfs()
+
+    def _initialize_bfs(self):
+        """Initialize BFS traversal."""
+        self.bfs_queue.clear()
+        self.visited.clear()
+        self.bfs_queue.append(0)
+        self.visited.add(0)
+        self.current_node = 0
 
     def reset(
         self, 
@@ -82,11 +86,9 @@ class GraphSegmentationEnv(gym.Env):
         
         # Reset environment state
         self.steps = 0
-        self.current_node = torch.randint(0, self.num_nodes, (1,)).item()
-        # self.segmentation_mask = np.zeros(self.num_nodes, dtype=np.int64)
-        
+        self._initialize_bfs()
+
         observation = self._get_observation()
-        self.visited_nodes = set([self.current_node])
         
         return observation
         
@@ -125,77 +127,23 @@ class GraphSegmentationEnv(gym.Env):
             'edge_index': self.graph.edge_index,
             'current_node': self.current_node,
             'valid_actions_mask': self._get_valid_actions_mask(),
-            # 'segmentation_mask': self.segmentation_mask
         }
     
     def _get_reward(self, action_cls: int, action_nav: int) -> float:
         """Calculate reward based on classification action."""
         true_label = self.graph.y[self.current_node].item()
         
-        # reward = self.reward_step  # Base reward/penalty for each step
-        
-        classification_reward = torch.zeros(self.num_classes)
+        classification_reward = torch.full((self.num_classes,), -0.1) # small negative baseline
 
-        # set index of correct class to 1 and all others to -1
-        classification_reward[true_label] = 1
+        if action_cls == true_label:
+            classification_reward[action_cls] = 1.0
+        else:
+            classification_reward[action_cls] = -1.0
+            classification_reward[true_label] = 1.0 # still give true label a reward
 
-        # set all other indices other than true label to -1
-        classification_reward[true_label] = 1
-        for i in range(self.num_classes):
-            if i != true_label:
-                classification_reward[i] = -1
-
-                
-        # Navigation reward
         navigation_reward = torch.zeros(4)
 
-        neighbors = self.graph.edge_index[1][
-            self.graph.edge_index[0] == self.current_node
-        ]
-
-        cur_x, cur_y = self.graph.x[self.current_node][:2]
-
-
-        # find which neighbor we are moving to based on action_nav and set current node to that neighbor
-        for neighbor in neighbors:
-            neighbor_x, neighbor_y = self.graph.x[neighbor][:2]
-            if action_nav == 0 and neighbor_x == cur_x - 1:
-                if neighbor in self.visited_nodes:
-                    navigation_reward[0] = -1
-                else:
-                    navigation_reward[0] = 0
-
-                self.current_node = neighbor.item()
-
-            elif action_nav == 1 and neighbor_x == cur_x + 1:
-                if neighbor in self.visited_nodes:
-                    navigation_reward[1] = -1
-                else:
-                    navigation_reward[1] = 0
-
-                self.current_node = neighbor.item()
-
-            elif action_nav == 2 and neighbor_y == cur_y - 1:
-                if neighbor in self.visited_nodes:
-                    navigation_reward[2] = -1
-                else:
-                    navigation_reward[2] = 0
-
-                self.current_node = neighbor.item()
-
-            elif action_nav == 3 and neighbor_y == cur_y + 1:
-                if neighbor in self.visited_nodes:
-                    navigation_reward[3] = -1
-                else:
-                    navigation_reward[3] = 0
-
-                self.current_node = neighbor.item()
-
-        # Add current node to visited nodes
-        self.visited_nodes.add(self.current_node)
-
         return {'cls': classification_reward, 'nav': navigation_reward }
-    
     
     def step(self, action: Dict[str, int]) -> Tuple[Dict, float, bool, bool, Dict]:
         """
@@ -211,13 +159,21 @@ class GraphSegmentationEnv(gym.Env):
         # Calculate reward
         reward = self._get_reward(action['cls'], action['nav'])
         
-        # Get new observation
-        observation = self._get_observation()
-        
         # Check termination conditions
         done = False
-        if self.steps >= self.max_steps or len(self.visited_nodes) == self.num_nodes:
+        if self.steps >= self.max_steps or not self.bfs_queue:
             done = True
+
+        if not done:
+            neighbors = self.graph.edge_index[1][self.graph.edge_index[0] == self.current_node]
+            for neighbor in neighbors:
+                if neighbor.item() not in self.visited:
+                    self.bfs_queue.append(neighbor.item())
+                    self.visited.add(neighbor.item())
+            self.current_node = self.bfs_queue.popleft()
+
+        # Get new observation
+        observation = self._get_observation()
 
         return observation, reward, done
 
