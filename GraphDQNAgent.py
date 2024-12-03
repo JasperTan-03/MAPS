@@ -286,7 +286,7 @@ class GraphDQNAgent:
                 )
 
                 if render:
-                    x, y = graph.x[state["current_node"].squeeze(), :2].cpu().numpy().astype(int)
+                    y, x = graph.x[state["current_node"].squeeze(), :2].cpu().numpy().astype(int)
                     renderer.update_position((x, y))
                     renderer.update_segmentation((x, y), cls_action)
                     renderer.render((x, y))
