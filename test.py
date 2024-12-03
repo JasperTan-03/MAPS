@@ -17,4 +17,4 @@ agent = GraphDQNAgent(node_feature_dim=graph.x.size(-1), gnn_hidden_dim=64,
                        gnn_output_dim=64, dqn_hidden_dim=64, num_classes=num_classes, k_hops=16)
 env = GraphSegmentationEnv(graph, num_classes)
 
-agent.train(env, num_episodes=10, max_steps=5000000, render=True)
+agent.train(env, train_dir= "data/aachen_graphs_downsampled",num_episodes=10, max_steps=5000000, render=True)

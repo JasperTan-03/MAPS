@@ -263,8 +263,8 @@ class GraphDQNAgent:
             if render:
                 # image_files = os.listdir(f"{image_dir}/images")
                 # label_files = os.listdir(f"{image_dir}/labels")
-                raw_image_path = "data/aachen_raw/aachen_000000_000019_leftImg8bit.png" #f"{image_dir}/images/{image_files[i]}"
-                label_image_path = "data/aachen_labeled/aachen_000000_000019_gtFine_labelIds.png" #f"{image_dir}/labels/{label_files[i]}"
+                raw_image_path = "data/aachen_raw_downsampled/aachen_000000_000019_leftImg8bit.png" #f"{image_dir}/images/{image_files[i]}"
+                label_image_path = "data/aachen_labeled_downsampled/aachen_000000_000019_gtFine_labelIds.png" #f"{image_dir}/labels/{label_files[i]}"
                 raw_image = Image.open(raw_image_path)
                 label_image = Image.open(label_image_path)
                 raw_image_array = np.array(raw_image)
@@ -285,8 +285,8 @@ class GraphDQNAgent:
                     {"cls": cls_action, "nav": 0} # random value for now since we are not using nav
                 )
 
-                if render and step % 1000 == 0:
-                    y, x = graph.x[state["current_node"], :2].cpu().numpy().astype(int)
+                if render:
+                    x, y = graph.x[state["current_node"].squeeze(), :2].cpu().numpy().astype(int)
                     renderer.update_position((x, y))
                     renderer.update_segmentation((x, y), cls_action)
                     renderer.render((x, y))
