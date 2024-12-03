@@ -46,7 +46,7 @@ class DuelingGNN(nn.Module):
     """Graph Neural Network with dueling architecture"""
 
     def __init__(
-        self, input_dim: int, hidden_dim: int, output_dim: int, num_hops: int = 2
+        self, input_dim: int, hidden_dim: int, output_dim: int, num_hops: int = 4
     ):
         super(DuelingGNN, self).__init__()
 
@@ -118,6 +118,7 @@ class DuelingGraphDQN(nn.Module):
         gnn_output_dim: int,
         dqn_hidden_dim: int,
         num_classes: int,
+        k_hops: int = 4,
     ):
         super(DuelingGraphDQN, self).__init__()
 
@@ -126,6 +127,7 @@ class DuelingGraphDQN(nn.Module):
             input_dim=node_feature_dim,
             hidden_dim=gnn_hidden_dim,
             output_dim=gnn_output_dim,
+            num_hops=k_hops,
         )
 
         # Classification streams
@@ -141,18 +143,18 @@ class DuelingGraphDQN(nn.Module):
             nn.Linear(dqn_hidden_dim, num_classes),
         )
 
-        # Navigation streams
-        self.nav_value = nn.Sequential(
-            nn.Linear(gnn_output_dim, dqn_hidden_dim),
-            nn.ReLU(),
-            nn.Linear(dqn_hidden_dim, 1),
-        )
+        # # Navigation streams
+        # self.nav_value = nn.Sequential(
+        #     nn.Linear(gnn_output_dim, dqn_hidden_dim),
+        #     nn.ReLU(),
+        #     nn.Linear(dqn_hidden_dim, 1),
+        # )
 
-        self.nav_advantage = nn.Sequential(
-            nn.Linear(gnn_output_dim, dqn_hidden_dim),
-            nn.ReLU(),
-            nn.Linear(dqn_hidden_dim, 4),  # for up, down, left, right
-        )
+        # self.nav_advantage = nn.Sequential(
+        #     nn.Linear(gnn_output_dim, dqn_hidden_dim),
+        #     nn.ReLU(),
+        #     nn.Linear(dqn_hidden_dim, 4),  # for up, down, left, right
+        # )
 
     def forward(
         self, state: Dict[str, torch.Tensor]
@@ -181,14 +183,14 @@ class DuelingGraphDQN(nn.Module):
             cls_advantage - cls_advantage.mean(dim=-1, keepdim=True)
         )
 
-        # Navigation stream
-        nav_value = self.nav_value(current_node_features)
-        nav_advantage = self.nav_advantage(current_node_features)
-        nav_logits = nav_value + (
-            nav_advantage - nav_advantage.mean(dim=-1, keepdim=True)
-        )
-        # Apply action mask
-        if "valid_actions_mask" in state:
-            nav_logits[~state["valid_actions_mask"]] = float("-inf")
+        # # Navigation stream
+        # nav_value = self.nav_value(current_node_features)
+        # nav_advantage = self.nav_advantage(current_node_features)
+        # nav_logits = nav_value + (
+        #     nav_advantage - nav_advantage.mean(dim=-1, keepdim=True)
+        # )
+        # # Apply action mask
+        # if "valid_actions_mask" in state:
+        #     nav_logits[~state["valid_actions_mask"]] = float("-inf")
 
-        return cls_logits, nav_logits
+        return cls_logits   # , nav_logits
