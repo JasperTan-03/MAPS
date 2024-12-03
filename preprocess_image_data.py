@@ -195,12 +195,10 @@ def create_graphs_for_dataset(raw_images_path, labeled_images_path, output_graph
 if __name__ == "__main__":
     raw_images_path = "data/aachen_raw"
     labeled_images_path = "data/aachen_labeled"
-    output_graphs_path = "data/aachen_graphs"
-
-    # create_graphs_for_dataset(raw_images_path, labeled_images_path, output_graphs_path)
 
     downsampled_raw_path = "data/aachen_raw_downsampled"
     downsampled_labeled_path = "data/aachen_labeled_downsampled"
+    output_graphs_path = "data/aachen_graphs_downsampled"
     pool_size = 8
 
     save_max_pooled_images(
@@ -210,3 +208,6 @@ if __name__ == "__main__":
         downsampled_labeled_path,
         pool_size,
     )
+
+    # Create Graphs for Downsampled Images
+    create_graphs_for_dataset(downsampled_raw_path, downsampled_labeled_path, output_graphs_path)
