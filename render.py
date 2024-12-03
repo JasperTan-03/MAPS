@@ -120,7 +120,7 @@ class SegmentationRenderer:
         # Adjust layout and display
         plt.tight_layout()
         plt.draw()
-        # plt.pause(0.00001)
+        plt.pause(0.00001)
 
         if mode == "rgb_array":
             # Convert plot to RGB array

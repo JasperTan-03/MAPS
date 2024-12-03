@@ -1,11 +1,13 @@
+from collections import deque
+from typing import Any, Dict, Optional, Tuple
+
 import gymnasium as gym
 import numpy as np
 import torch
 from gymnasium import spaces
-from typing import Tuple, Optional, Dict, Any
 from torch_geometric.data import Data
 from torch_geometric.utils import k_hop_subgraph
-from collections import deque
+
 
 class GraphSegmentationEnv(gym.Env):
     """Custom Environment for graph-based image/point cloud segmentation that follows gym interface."""
@@ -55,7 +57,6 @@ class GraphSegmentationEnv(gym.Env):
         })
         
         # Initialize state
-        self.current_node = None
         self.steps = 0
         self.max_steps = self.num_nodes * 2  # Adjust based on needs
 
@@ -69,7 +70,7 @@ class GraphSegmentationEnv(gym.Env):
         self.visited.clear()
         self.bfs_queue.append(0)
         self.visited.add(0)
-        self.current_node = 0
+        self.current_node = torch.tensor(self.num_nodes // 2)
 
     def reset(
         self, 
@@ -170,7 +171,9 @@ class GraphSegmentationEnv(gym.Env):
                 if neighbor.item() not in self.visited:
                     self.bfs_queue.append(neighbor.item())
                     self.visited.add(neighbor.item())
-            self.current_node = self.bfs_queue.popleft()
+            self.current_node = torch.tensor(self.bfs_queue.popleft())
+        else:
+            self.current_node = None
 
         # Get new observation
         observation = self._get_observation()

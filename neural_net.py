@@ -9,38 +9,6 @@ import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, global_mean_pool
 from torch_geometric.utils import k_hop_subgraph, to_dense_adj
 
-# Define experience tuple structure
-Experience = namedtuple(
-    "Experience",
-    (
-        "state",
-        "action_nav",
-        "action_cls",
-        "next_state",
-        "reward_nav",
-        "reward_cls",
-        "done",
-    ),
-)
-
-
-class ReplayBuffer:
-    """Experience replay buffer with uniform sampling"""
-
-    def __init__(self, capacity: int):
-        self.buffer = deque(maxlen=capacity)
-
-    def push(self, *args):
-        """Save an experience"""
-        self.buffer.append(Experience(*args))
-
-    def sample(self, batch_size: int) -> Tuple:
-        experiences = random.sample(self.buffer, batch_size)
-        return Experience(*zip(*experiences))
-
-    def __len__(self) -> int:
-        return len(self.buffer)
-
 
 class DuelingGNN(nn.Module):
     """Graph Neural Network with dueling architecture"""
@@ -51,7 +19,7 @@ class DuelingGNN(nn.Module):
         super(DuelingGNN, self).__init__()
 
         self.num_hops = num_hops
-        self.convs = nn.ModuleList()
+        self.output_dim = output_dim
 
         # GCN layers
         self.convs = nn.ModuleList(
@@ -71,8 +39,22 @@ class DuelingGNN(nn.Module):
         )
 
     def get_subgraph(
-        self, x: torch.Tensor, edge_index: torch.Tensor, current_node: int
+        self, x: torch.Tensor, edge_index: torch.Tensor, current_node: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+
+        """
+        Get k-hop subgraph for one or more nodes.
+
+        Args:
+            x: Node feature tensor [num_nodes, feature_dim]
+            edge_index: Edge index tensor [2, num_edges]
+            current_nodes: Index or indices of current nodes (int or [batch_size])
+
+        Returns:
+            sub_x: Subgraph node features
+            sub_edge_index: Subgraph edge indices
+            mapping: Mapping from original nodes to subgraph nodes
+        """
 
         # Get k-hop subgraph
         subset, sub_edge_index, mapping, _ = k_hop_subgraph(
@@ -85,8 +67,12 @@ class DuelingGNN(nn.Module):
         return sub_x, sub_edge_index, mapping
 
     def forward(
-        self, x: torch.Tensor, edge_index: torch.Tensor, current_node: int
+        self, x: torch.Tensor, edge_index: torch.Tensor, current_node: torch.Tensor
     ) -> torch.Tensor:
+
+        if current_node.dim() == 0:  # If it's a scalar tensor (0D)
+            current_node = current_node.unsqueeze(0)  # Convert to [1] tensor
+
         # Get k-hop subgraph
         sub_x, sub_edge_index, mapping = self.get_subgraph(x, edge_index, current_node)
 
@@ -97,15 +83,12 @@ class DuelingGNN(nn.Module):
             sub_x = F.dropout(sub_x, p=0.1, training=self.training)
             sub_x = self.layer_norms[i](sub_x)
 
-        batch = torch.zeros(sub_x.shape[0], dtype=torch.long)
-        # put batch to same device as sub_x
-        if sub_x.is_cuda:
-            batch = batch.cuda(sub_x.device)
-
-        # Pooling
-        x = global_mean_pool(sub_x, batch=batch)
-
-        return x
+        # Pooling (to handle batch dimensions)
+        batch = torch.zeros(sub_x.size(0), dtype=torch.long, device=sub_x.device)
+        batch[mapping] = torch.arange(len(current_node), device=sub_x.device)
+        x_pooled = global_mean_pool(sub_x, batch=batch, size=current_node.size(0))
+        
+        return x_pooled
 
 
 class DuelingGraphDQN(nn.Module):
@@ -170,15 +153,14 @@ class DuelingGraphDQN(nn.Module):
                 - valid_actions_mask: Binary mask for valid navigation actions
         """
 
+        if state["current_node"].dim() == 0:  # If it's a scalar tensor (0D)
+            state["current_node"] = state["current_node"].unsqueeze(0)  # Convert to [1] tensor
+
         # Extract node features
         node_features = self.gnn(state["x"], state["edge_index"], state["current_node"])
-
-        # Get features for current node (assuming it's the first node in batch)
-        current_node_features = node_features[0]
-
         # Classification stream
-        cls_value = self.cls_value(current_node_features)
-        cls_advantage = self.cls_advantage(current_node_features)
+        cls_value = self.cls_value(node_features)
+        cls_advantage = self.cls_advantage(node_features)
         cls_logits = cls_value + (
             cls_advantage - cls_advantage.mean(dim=-1, keepdim=True)
         )

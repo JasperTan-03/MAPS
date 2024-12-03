@@ -1,10 +1,10 @@
 import math
 import os
 import random
+from collections import deque, namedtuple
 from typing import Dict, List, Optional, Tuple
 
 import matplotlib as plt
-from tqdm import tqdm
 import numpy as np
 import torch
 import torch.nn as nn
@@ -12,12 +12,47 @@ import torch.nn.functional as F
 import torch.optim as optim
 import yaml
 from PIL import Image
+from torch_geometric.data import Batch, Data
 from tqdm import tqdm
 
 import wandb
-from neural_net import DuelingGraphDQN, ReplayBuffer
+from neural_net import DuelingGraphDQN
 from render import SegmentationRenderer
 from rl_environment import GraphSegmentationEnv
+
+Experience = namedtuple(
+    "Experience",
+    (
+        "state",       # Current state
+        "action_cls",  # Action taken (classification)
+        "next_state",  # Next state
+        "reward_cls",  # Reward for classification action
+        "done",        # Whether the episode is done
+    ),
+)
+
+
+class ReplayBuffer:
+    """Experience replay buffer with uniform sampling"""
+
+    def __init__(self, capacity: int):
+        self.buffer = deque(maxlen=capacity)
+
+    def push(self, state, action_cls, next_state, reward_cls, done):
+        """Save an experience"""
+        state_data = Data(x=state["x"], edge_index=state["edge_index"], current_node=state["current_node"], valid_actions_mask=state["valid_actions_mask"])
+        next_state_data = Data(x=next_state["x"], edge_index=next_state["edge_index"], current_node=next_state["current_node"], valid_actions_mask=next_state["valid_actions_mask"])
+        
+        self.buffer.append(Experience(state_data, action_cls, next_state_data, reward_cls, done))
+
+    def sample(self, batch_size: int) -> Tuple:
+        """Sample a batch of experiences"""
+        experiences = random.sample(self.buffer, batch_size)
+        return Experience(*zip(*experiences))
+
+    def __len__(self) -> int:
+        return len(self.buffer)
+
 
 
 class GraphDQNAgent:
@@ -85,107 +120,123 @@ class GraphDQNAgent:
         self.losses = []
         self.update_every = args["update_every"]
 
-    def select_action(
-        self, expected_cls_q, expected_nav_q, valid_actions_mask
-    ) -> Tuple[int, int]:
-        """Select an action using epsilon-greedy policy.
+    # def select_action(
+    #     self, expected_cls_q, expected_nav_q, valid_actions_mask
+    # ) -> Tuple[int, int]:
+    #     """Select an action using epsilon-greedy policy.
 
-        Args:
-            state (dict): Current state
+    #     Args:
+    #         state (dict): Current state
 
-        Returns:
-            Tuple[int, int]: Chosen action
-        """
-        # # Move state tensors to device and add batch dimension if needed
-        # state = {
-        #     k: v.to(self.device) if isinstance(v, torch.Tensor) else v
-        #     for k, v in state.items()
-        # }
+    #     Returns:
+    #         Tuple[int, int]: Chosen action
+    #     """
+    #     # # Move state tensors to device and add batch dimension if needed
+    #     # state = {
+    #     #     k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+    #     #     for k, v in state.items()
+    #     # }
 
-        self.epsilon = self.epsilon_end + (self.epsilon - self.epsilon_end) * math.exp(
-            -1.0 * self.t_step / self.epsilon_decay
-        )
+    #     self.epsilon = self.epsilon_end + (self.epsilon - self.epsilon_end) * math.exp(
+    #         -1.0 * self.t_step / self.epsilon_decay
+    #     )
 
-        # Epsilon-greedy action selection
-        if random.random() > self.epsilon:
-            with torch.no_grad():
-                cls_action = expected_cls_q.argmax().item()
-                # nav_action = expected_nav_q.argmax().item()
-        else:
-            # Random classification action
-            cls_action = random.randrange(self.policy_net.cls_advantage[2].out_features)
-            # Random navigation action from valid actions
-            # valid_actions = torch.where(valid_actions_mask)[0]
-            # nav_action = valid_actions[random.randrange(len(valid_actions))].item()
+    #     # Epsilon-greedy action selection
+    #     if random.random() > self.epsilon:
+    #         with torch.no_grad():
+    #             cls_action = expected_cls_q.argmax().item()
+    #             # nav_action = expected_nav_q.argmax().item()
+    #     else:
+    #         # Random classification action
+    #         cls_action = random.randrange(self.policy_net.cls_advantage[2].out_features)
+    #         # Random navigation action from valid actions
+    #         # valid_actions = torch.where(valid_actions_mask)[0]
+    #         # nav_action = valid_actions[random.randrange(len(valid_actions))].item()
 
-        # with torch.no_grad():
-        #     cls_action = expected_cls_q.argmax().item()
+    #     # with torch.no_grad():
+    #     #     cls_action = expected_cls_q.argmax().item()
 
-        return cls_action   # , nav_action
+    #     return cls_action   # , nav_action
 
     def optimize_model(self) -> Optional[torch.Tensor]:
-        """Perform a single step of optimization on the policy network.
-
-        Returns:
-            Optional[torch.Tensor]: Loss value
-        """
+        """Perform a single step of optimization on the policy network."""
         if len(self.memory) < self.batch_size:
             return None
 
         # Sample a batch of experiences
         batch = self.memory.sample(self.batch_size)
 
-        # Separate experiences into batches
-        non_final_mask = torch.tensor(
-            tuple(map(lambda s: s is not None, batch.next_state)),
-            device=self.device,
-            dtype=torch.bool,
-        )
-        non_final_next_states = torch.cat(
-            [s for s in batch.next_state if s is not None]
-        )
+        # Create mask for non-final states
+        non_final_mask = torch.tensor([s["current_node"] is not None for s in batch.next_state], device=self.device)
+        # Filter batch components based on the mask
+        state_batch = [s for i, s in enumerate(batch.state) if non_final_mask[i]]
+        next_state_batch = [s for i, s in enumerate(batch.next_state) if non_final_mask[i]]
+        action_cls_batch = torch.cat([a.view(-1) for i, a in enumerate(batch.action_cls) if non_final_mask[i]]).unsqueeze(1)
 
-        state_batch = torch.cat(batch.state)
-        action_nav_batch = torch.cat(batch.action_nav)
-        action_cls_batch = torch.cat(batch.action_cls)
-        reward_batch = torch.cat(batch.reward)
-
-        # Current Q values
-        policy_cls_q, policy_nav_q = self.policy_net(state_batch)
-        policy_cls_q = policy_cls_q.gather(1, action_cls_batch)
-        policy_nav_q = policy_nav_q.gather(1, action_nav_batch)
-
-        # Compute target Q values
-        next_cls_q = torch.zeros(self.batch_size, device=self.device)
-        next_nav_q = torch.zeros(self.batch_size, device=self.device)
-
-        with torch.no_grad():
-            next_cls_q_values, next_nav_q_values = self.target_net(
-                non_final_next_states
+        reward_batch = torch.cat([r.view(-1, self.num_classes) for i, r in enumerate(batch.reward_cls) if non_final_mask[i]], dim=0)
+        # Convert states to lists of Data objects
+        def create_data(state):
+            return Data(
+                x=state["x"],
+                edge_index=state["edge_index"],
+                current_node=state["current_node"].view(-1),
+                valid_actions_mask=state["valid_actions_mask"].view(-1),
             )
-            next_cls_q[non_final_mask] = next_cls_q_values.max(1).values
-            next_nav_q[non_final_mask] = next_nav_q_values.max(1).values
+
+        state_batch = Batch.from_data_list([create_data(s) for s in state_batch])
+        if next_state_batch:
+            next_state_batch = Batch.from_data_list([create_data(s) for s in next_state_batch])
+
+        # Current Q values (prediction from policy network)
+        policy_cls_q = torch.zeros((len(non_final_mask), self.num_classes), device=self.device)
+        policy_cls_q_values = self.policy_net(state_batch)
+        policy_cls_q[non_final_mask] = policy_cls_q_values
 
         # Compute target Q values
+        next_cls_q = torch.zeros((len(non_final_mask), self.num_classes), device=self.device)
+        with torch.no_grad():
+            if next_state_batch:
+                next_cls_q_values = self.target_net(next_state_batch)
+                next_cls_q[non_final_mask] = next_cls_q_values
+
+        # Compute expected Q values
         expected_cls_q = (next_cls_q * self.gamma) + reward_batch
-        expected_nav_q = (next_nav_q * self.gamma) + reward_batch
 
         # Compute loss
-        # criterion = nn.SmoothL1Loss()
-        criterion = nn.MSELoss()
-        cls_loss = criterion(policy_cls_q, expected_cls_q.unsqueeze(1))
-        nav_loss = criterion(policy_nav_q, expected_nav_q.unsqueeze(1))
-        total_loss = cls_loss + nav_loss
+        criterion = nn.SmoothL1Loss()
+        cls_loss = criterion(policy_cls_q, expected_cls_q)
 
         # Optimize the model
         self.optimizer.zero_grad()
-        total_loss.backward()
+        cls_loss.backward()
 
         # Gradient clipping
-        torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), max_norm=0.5)
+        torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
         self.optimizer.step()
 
-        return total_loss.item()
+        return cls_loss.item()
+
+    
+    def select_action(self, state):
+
+        
+        
+        self.epsilon = self.epsilon_end + (self.epsilon - self.epsilon_end) * math.exp(
+            -1.0 * self.t_step / self.epsilon_decay
+        )
+
+        self.t_step += 1
+
+        # Epsilon-greedy action selection
+        if random.random() > self.epsilon:
+            with torch.no_grad():
+                q_values = self.policy_net(state)
+                cls_action = q_values.max(1)[1].view(1, 1)
+        else:
+            cls_action = torch.tensor([[random.randrange(self.num_classes)]], device=self.device, dtype=torch.long)
+
+        return cls_action
+        
 
     def train(
         self,
@@ -202,6 +253,8 @@ class GraphDQNAgent:
         files = os.listdir(train_dir)
 
         for i, episode in enumerate(range(num_episodes)):
+
+
             # Load graph
             graph = torch.load(f"{train_dir}/{files[i]}")
             state = env.reset(new_graph=graph)
@@ -225,95 +278,135 @@ class GraphDQNAgent:
                 )
 
             for step in range(max_steps):
-                # Select action
-                # expected_cls_q, expected_nav_q = self.policy_net(state)
-                expected_cls_q = self.policy_net(state) # only classification for now 
+                
+                cls_action = self.select_action(state)
 
-                cls_action = self.select_action(
-                    expected_cls_q=expected_cls_q,
-                    expected_nav_q=0,   # random value for now since we are not using nav
-                    valid_actions_mask=state["valid_actions_mask"],
-                )
-
-                # if selected action is the correct label print it
-                if cls_action == graph.y[state["current_node"]]:
-                    print(f"Correct label selected: {cls_action}")
-
-                next_step, rewards, done = env.step(
+                next_state, rewards, done = env.step(
                     {"cls": cls_action, "nav": 0} # random value for now since we are not using nav
                 )
 
-                if render:
+                if render and step % 1000 == 0:
                     y, x = graph.x[state["current_node"], :2].cpu().numpy().astype(int)
                     renderer.update_position((x, y))
                     renderer.update_segmentation((x, y), cls_action)
                     renderer.render((x, y))
 
-                # Unpack rewards
+                # Unpack rewards 
                 cls_rewards = rewards["cls"].to(self.device)
-                # nav_rewards = rewards["nav"].to(self.device)
-                print(cls_rewards)
 
                 # Add rewards
                 episode_reward_cls += cls_rewards[cls_action]
-                # episode_reward_nav += nav_rewards[nav_action]
 
-                # Compute Loss
-                criterion = nn.SmoothL1Loss()
-                # before calculted loss set the masked expected q values from nav from -inf to some finite
-                # negative value
-                # expected_nav_q[~state["valid_actions_mask"]] = -1
+                self.memory.push(state, cls_action, next_state, cls_rewards, done)
 
-                cls_loss = criterion(expected_cls_q, cls_rewards)
-                # nav_loss = criterion(expected_nav_q, nav_rewards)
-                # total_loss = cls_loss + nav_loss
+                state = next_state
 
-                # Log metrics to wandb
+                loss = self.optimize_model()
+
                 wandb.log(
                     {
                         "step": self.t_step,
                         "classification_reward": cls_rewards[cls_action],
-                        # "navigation_reward": nav_rewards[nav_action],
-                        # "total_reward": cls_rewards[cls_action]
-                        # + nav_rewards[nav_action],
-                        "classification_loss": cls_loss.item(),
-                        # "navigation_loss": nav_loss.item(),
-                        # "total_loss": total_loss.item(),
+                        "classification_loss": loss,
                         "epsilon": self.epsilon,
+                        "total_reward": episode_reward_cls
                     }
                 )
 
-                # Optimize the model
-                self.optimizer.zero_grad()
-                cls_loss.backward()
-
-                # Gradient clipping
-                torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=1)
-
-                self.optimizer.step()
-                state = next_step
-                self.t_step += 1
+                # soft update of target network
+                target_net_state_dict = self.target_net.state_dict()
+                policy_net_state_dict = self.policy_net.state_dict()
+                for key in policy_net_state_dict:
+                    target_net_state_dict[key] = self.tau*policy_net_state_dict[key] + (1-self.tau)*target_net_state_dict[key]
+                self.target_net.load_state_dict(target_net_state_dict)
 
                 if done:
                     print(f"Episode {episode} finished after {step} steps")
                     break
 
-            episode_rewards_cls.append(episode_reward_cls)
-            # episode_rewards_nav.append(episode_reward_nav)
 
-            # Log episode metrics
-            wandb.log(
-                {
-                    "episode": episode,
-                    "episode_classification_reward": episode_reward_cls,
-                    # "episode_navigation_reward": episode_reward_nav,
-                    # "episode_total_reward": episode_reward_cls + episode_reward_nav,
-                }
-            )
-            if render:
-                renderer.close()
 
-        wandb.finish()
+
+        #         expected_cls_q = self.policy_net(state) # only classification for now 
+
+        #         cls_action = self.select_action(
+        #             expected_cls_q=expected_cls_q,
+        #             expected_nav_q=0,   # random value for now since we are not using nav
+        #             valid_actions_mask=state["valid_actions_mask"],
+        #         )
+
+        #         # if selected action is the correct label print it
+        #         if cls_action == graph.y[state["current_node"]]:
+        #             print(f"Correct label selected: {cls_action}")
+
+        #         next_step, rewards, done = env.step(
+        #             {"cls": cls_action, "nav": 0} # random value for now since we are not using nav
+        #         )
+
+        #         if render:
+        #             y, x = graph.x[state["current_node"], :2].cpu().numpy().astype(int)
+        #             renderer.update_position((x, y))
+        #             renderer.update_segmentation((x, y), cls_action)
+        #             renderer.render((x, y))
+
+        #         # Unpack rewards
+        #         cls_rewards = rewards["cls"].to(self.device)
+        #         print(cls_rewards)
+
+        #         # Add rewards
+        #         episode_reward_cls += cls_rewards[cls_action]
+
+        #         # Compute Loss
+        #         criterion = nn.SmoothL1Loss()
+        #         cls_loss = criterion(expected_cls_q, cls_rewards)
+
+        #         # Log metrics to wandb
+        #         wandb.log(
+        #             {
+        #                 "step": self.t_step,
+        #                 "classification_reward": cls_rewards[cls_action],
+        #                 # "navigation_reward": nav_rewards[nav_action],
+        #                 # "total_reward": cls_rewards[cls_action]
+        #                 # + nav_rewards[nav_action],
+        #                 "classification_loss": cls_loss.item(),
+        #                 # "navigation_loss": nav_loss.item(),
+        #                 # "total_loss": total_loss.item(),
+        #                 "epsilon": self.epsilon,
+        #             }
+        #         )
+
+        #         # Optimize the model
+        #         self.optimizer.zero_grad()
+        #         cls_loss.backward()
+
+        #         # Gradient clipping
+        #         torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=1)
+
+        #         self.optimizer.step()
+        #         state = next_step
+        #         self.t_step += 1
+
+        #         if done:
+        #             print(f"Episode {episode} finished after {step} steps")
+        #             break
+
+        #     episode_rewards_cls.append(episode_reward_cls)
+        #     # episode_rewards_nav.append(episode_reward_nav)
+
+        #     # Log episode metrics
+        #     wandb.log(
+        #         {
+        #             "episode": episode,
+        #             "episode_classification_reward": episode_reward_cls,
+        #             # "episode_navigation_reward": episode_reward_nav,
+        #             # "episode_total_reward": episode_reward_cls + episode_reward_nav,
+        #         }
+        #     )
+        #     if render:
+        #         renderer.close()
+
+        # wandb.finish()
+
         return episode_rewards_cls
 
     def plot_training_results(self, episode_rewards: List[float]):
