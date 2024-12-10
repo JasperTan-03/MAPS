@@ -23,3 +23,22 @@ python preprocess_image_data.py
 ```
 
 ## Training
+
+To train the model, follow these steps:
+
+1. Update the `configs/training_config.yaml` file to adjust hyperparameters and specify the graph input file path:
+   - **graph_path**: Path to the input graph file (PyTorch format).
+   - **gnn_hidden_dim**: Hidden dimension size for the GNN.
+   - **gnn_output_dim**: Output dimension size for the GNN.
+   - **dqn_hidden_dim**: Hidden dimension size for the DQN.
+   - **num_classes**: Number of segmentation classes.
+   - **k_hops**: Number of hops for graph aggregation.
+   - **train_dir**: Directory to save training outputs and checkpoints.
+   - **num_episodes**: Total number of training episodes.
+   - **max_steps**: Maximum steps per episode.
+   - **render**: Set to `True` to visualize training steps.
+
+2. Start training by running the `train.py` script:
+```bash
+python train.py
+```

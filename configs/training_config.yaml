@@ -1,0 +1,11 @@
+    graph_path: "data/aachen_graphs_downsampled/aachen_000000_000019.pt"
+    num_classes: 34
+    node_feature_dim: 128
+    gnn_hidden_dim: 128
+    gnn_output_dim: 128
+    dqn_hidden_dim: 128
+    k_hops: 8
+    train_dir: "data/aachen_graphs_downsampled"
+    num_episodes: 100
+    max_steps: 5000000
+    render: true
