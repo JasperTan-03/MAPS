@@ -13,8 +13,8 @@ num_classes = 34
 folder = "./data/aachen_graphs"
 
 
-agent = GraphDQNAgent(node_feature_dim=graph.x.size(-1), gnn_hidden_dim=64,
-                       gnn_output_dim=64, dqn_hidden_dim=64, num_classes=num_classes, k_hops=16)
+agent = GraphDQNAgent(node_feature_dim=graph.x.size(-1), gnn_hidden_dim=128,
+                       gnn_output_dim=128, dqn_hidden_dim=128, num_classes=num_classes, k_hops=8)
 env = GraphSegmentationEnv(graph, num_classes)
 
-agent.train(env, train_dir= "data/aachen_graphs_downsampled",num_episodes=10, max_steps=5000000, render=True)
+agent.train(env, train_dir= "data/aachen_graphs_downsampled",num_episodes=100, max_steps=5000000, render=True)

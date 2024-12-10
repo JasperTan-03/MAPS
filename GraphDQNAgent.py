@@ -52,6 +52,9 @@ class ReplayBuffer:
 
     def __len__(self) -> int:
         return len(self.buffer)
+    
+    def clear(self):
+        self.buffer.clear()
 
 
 
@@ -253,29 +256,37 @@ class GraphDQNAgent:
         files = os.listdir(train_dir)
 
         for i, episode in enumerate(range(num_episodes)):
-
+            
+            if i == 0: 
+                continue
 
             # Load graph
             graph = torch.load(f"{train_dir}/{files[i]}")
             state = env.reset(new_graph=graph)
             episode_reward_cls = 0
-            # episode_reward_nav = 0
+            self.memory.clear()
+
             if render:
                 # image_files = os.listdir(f"{image_dir}/images")
                 # label_files = os.listdir(f"{image_dir}/labels")
-                raw_image_path = "data/aachen_raw_downsampled/aachen_000000_000019_leftImg8bit.png" #f"{image_dir}/images/{image_files[i]}"
-                label_image_path = "data/aachen_labeled_downsampled/aachen_000000_000019_gtFine_labelIds.png" #f"{image_dir}/labels/{label_files[i]}"
+                # raw_image_path = "data/aachen_raw_downsampled/aachen_000000_000019_leftImg8bit.png" #f"{image_dir}/images/{image_files[i]}"
+                # label_image_path = "data/aachen_labeled_downsampled/aachen_000000_000019_gtFine_labelIds.png" #f"{image_dir}/labels/{label_files[i]}"
+                # raw_image = Image.open(raw_image_path)
+                # label_image = Image.open(label_image_path)
+                # raw_image_array = np.array(raw_image)
+                # label_image_array = np.array(label_image)
+                # image_size = raw_image_array.shape[:2]
+                # renderer = SegmentationRenderer(
+                #     original_image=raw_image_array,
+                #     ground_truth=label_image_array,
+                #     num_classes=self.num_classes,
+                #     image_size=image_size,
+                # )
+                raw_image_path = f"data/aachen_raw_downsampled/{files[i].replace('.pt', '_leftImg8bit.png')}"
                 raw_image = Image.open(raw_image_path)
-                label_image = Image.open(label_image_path)
                 raw_image_array = np.array(raw_image)
-                label_image_array = np.array(label_image)
-                image_size = raw_image_array.shape[:2]
-                renderer = SegmentationRenderer(
-                    original_image=raw_image_array,
-                    ground_truth=label_image_array,
-                    num_classes=self.num_classes,
-                    image_size=image_size,
-                )
+                predictions = np.zeros_like(raw_image_array)
+
 
             for step in range(max_steps):
                 
@@ -287,9 +298,10 @@ class GraphDQNAgent:
 
                 if render:
                     y, x = graph.x[state["current_node"].squeeze(), :2].cpu().numpy().astype(int)
-                    renderer.update_position((x, y))
-                    renderer.update_segmentation((x, y), cls_action)
-                    renderer.render((x, y))
+                    # renderer.update_position((x, y))
+                    # renderer.update_segmentation((x, y), cls_action)
+                    # renderer.render((x, y))
+                    predictions[x, y] = cls_action.item()
 
                 # Unpack rewards 
                 cls_rewards = rewards["cls"].to(self.device)
@@ -322,6 +334,13 @@ class GraphDQNAgent:
 
                 if done:
                     print(f"Episode {episode} finished after {step} steps")
+                    # save the predictions
+                    predictions = Image.fromarray(predictions.astype(np.uint8))
+                    os.makedirs("predictions", exist_ok=True)
+                    predictions.save(f"predictions/{files[i].replace('.pt', '.png')}")
+
+
+                    self.save_model("maps")
                     break
 
 
@@ -438,7 +457,8 @@ class GraphDQNAgent:
             path (str): path to save the model weights
         """
         os.makedirs("weights", exist_ok=True)
-        torch.save(self.policy_net.state_dict(), f"weights/{path}.pth")
+        torch.save(self.policy_net.state_dict(), f"weights/{path}_policy.pt")
+        torch.save(self.target_net.state_dict(), f"weights/{path}_target.pt")
 
     def load_model(self, path: str):
         """Load model weights.
