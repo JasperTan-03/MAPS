@@ -1,5 +1,9 @@
-# MAPS
-Multi-Agent Lidar 3D Point Cloud Segmentation
+# Graph RL for Semantic Segmentation
+
+This project explores the use of graph-based reinforcement learning for semantic segmentation in both 2D images and 3D point clouds. By constructing graph representations and leveraging spatial and contextual features, the framework demonstrates adaptability across different dimensional data.  
+
+Read the full paper [here](https://drive.google.com/file/d/14Yx7wo7U4WGIoSClWHPu0RniNntLXLSf/view?usp=drive_link).
+
 
 ## Setup
 
