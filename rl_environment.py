@@ -167,8 +167,6 @@ class GraphSegmentationEnv(gym.Env):
 
         if not done:
             neighbors = self.graph.edge_index[1][self.graph.edge_index[0] == self.current_node]
-            if self.current_node.item() == 0:
-                print("here")
             for neighbor in neighbors:
                 if neighbor.item() not in self.visited:
                     self.bfs_queue.append(neighbor.item())
