@@ -4,6 +4,8 @@ This project explores the use of graph-based reinforcement learning for semantic
 
 Read the full paper [here](https://drive.google.com/file/d/14Yx7wo7U4WGIoSClWHPu0RniNntLXLSf/view?usp=drive_link).
 
+View the poster [here](https://drive.google.com/file/d/1ENzbhKc1dxW8rBWIWf-rolps4FHtr1Ad/view?usp=drive_link) 
+
 
 ## Setup
 
